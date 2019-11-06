@@ -1,1 +1,2 @@
-# Rendering01_SoftwareRasterizer_
+# Rasterizer
+Software Rasterizer

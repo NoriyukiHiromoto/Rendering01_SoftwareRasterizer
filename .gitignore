@@ -30,3 +30,14 @@
 *.exe
 *.out
 *.app
+.vs/Rasterizer/v15/
+project/bin/Rasterizer.ilk
+project/bin/Rasterizer.pdb
+project/obj/msvc/Rasterizer-Debug-x64/
+project/obj/msvc/Rasterizer-Release-x64/
+project/bin/Rasterizer.iobj
+project/bin/Rasterizer.ipdb
+project/My Amplifier Results - Rasterizer/
+project/My Advisor Results - Rasterizer/
+project/My Inspector Results - Rasterizer/
+.vs/
