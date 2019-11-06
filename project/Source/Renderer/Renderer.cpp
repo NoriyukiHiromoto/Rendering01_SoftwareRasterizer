@@ -19,6 +19,7 @@
 //======================================================================================================
 Renderer::Renderer()
 	: _pColorBuffer(nullptr)
+	, _pDepthBuffer(nullptr)
 {
 }
 
@@ -32,9 +33,10 @@ Renderer::~Renderer()
 //======================================================================================================
 //
 //======================================================================================================
-void Renderer::BeginDraw(ColorBuffer* pColorBuffer, const Matrix& mView, const Matrix& mProj)
+void Renderer::BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, const Matrix& mView, const Matrix& mProj)
 {
 	_pColorBuffer = pColorBuffer;
+	_pDepthBuffer = pDepthBuffer;
 	_ViewMatrix = mView;
 	_ProjMatrix = mProj;
 
@@ -48,15 +50,6 @@ void Renderer::EndDraw()
 {
 	Matrix mViewProj;
 	Matrix_Multiply4x4(mViewProj, _ViewMatrix, _ProjMatrix);
-
-	struct SortTriangleData
-	{
-		fp32 z;
-		const IMeshData* pMesh;
-		Vector4 Position[3];
-		Vector3 Normal[3];
-	};
-	static std::vector<SortTriangleData> SortTriangleDatas;
 
 	// メッシュ毎に処理する
 	{
@@ -83,44 +76,14 @@ void Renderer::EndDraw()
 				Matrix_Transform3x3(Normals[i], pNormalTbl[i], Mesh.mWorld);
 			}
 
-			// ここで三角形ごとに展開してソート用のデータを作る
-			for (auto i = 0; i < Mesh.pMeshData->GetIndexCount(); i += 3)
-			{
-				const auto i0 = Mesh.pMeshData->GetIndex()[i];
-				const auto i1 = Mesh.pMeshData->GetIndex()[i + 1];
-				const auto i2 = Mesh.pMeshData->GetIndex()[i + 2];
-
-				SortTriangleData Data;
-				Data.z = (Positions[i0].w + Positions[i0].w + Positions[i0].w) / 3.0f;
-				Data.pMesh = Mesh.pMeshData;
-				Data.Position[0] = Positions[i0];
-				Data.Position[1] = Positions[i1];
-				Data.Position[2] = Positions[i2];
-				Data.Normal[0] = Normals[i0];
-				Data.Normal[1] = Normals[i1];
-				Data.Normal[2] = Normals[i2];
-				SortTriangleDatas.emplace_back(Data);
-			}
+			RenderTriangle(
+				Mesh.pMeshData,
+				Positions,
+				Normals,
+				VertexCount,
+				Mesh.pMeshData->GetIndex(),
+				Mesh.pMeshData->GetIndexCount());
 		}
-	}
-
-	// ここでソートを行う
-	std::sort(
-		SortTriangleDatas.begin(),
-		SortTriangleDatas.end(),
-		[](SortTriangleData& l, SortTriangleData& r) { return l.z > r.z; });
-
-	// ソート結果に合わせて描画
-	for (auto&& Mesh : SortTriangleDatas)
-	{
-		static const uint16_t IndexTbl[] = { 0, 1, 2 };
-		RenderTriangle(
-			Mesh.pMesh,
-			Mesh.Position,
-			Mesh.Normal,
-			3,
-			IndexTbl,
-			3);
 	}
 }
 
@@ -130,18 +93,23 @@ void Renderer::EndDraw()
 void Renderer::RasterizeTriangle(InternalVertex v0, InternalVertex v1, InternalVertex v2)
 {
 	// 三角形の各位置
-	const auto& p0 = v0.Position;
-	const auto& p1 = v1.Position;
-	const auto& p2 = v2.Position;
+	auto& p0 = v0.Position;
+	auto& p1 = v1.Position;
+	auto& p2 = v2.Position;
 
 	// 三角形の各法線
-	const auto& n0 = v0.Normal;
-	const auto& n1 = v1.Normal;
-	const auto& n2 = v2.Normal;
+	auto& n0 = v0.Normal;
+	auto& n1 = v1.Normal;
+	auto& n2 = v2.Normal;
 
 	// 外積から面の向きを求めて、裏向きなら破棄する（backface-culling)
 	const auto Denom = EdgeFunc(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
 	if (Denom <= 0.0f) return;
+
+	const auto InvDenom = 1.0f / Denom;
+	p0.z /= p0.w;
+	p1.z /= p1.w;
+	p2.z /= p2.w;
 
 	// ポリゴンのバウンディングを求める
 	auto bbMinX = p0.x, bbMinY = p0.y, bbMaxX = p0.x, bbMaxY = p0.y;
@@ -159,6 +127,7 @@ void Renderer::RasterizeTriangle(InternalVertex v0, InternalVertex v1, InternalV
 	const auto y0 = int16(bbMinY);
 	const auto y1 = int16(bbMaxY);
 
+	auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(x0, y0);
 	auto pColorBuffer = _pColorBuffer->GetPixelPointer(x0, y0);
 
 	// 求めたバウンディング内をforで回す
@@ -179,9 +148,15 @@ void Renderer::RasterizeTriangle(InternalVertex v0, InternalVertex v1, InternalV
 			auto b2 = EdgeFunc(p0.x, p0.y, p1.x, p1.y, px, py);
 			if (b2 < 0.0f) continue;
 
-			b0 /= Denom;
-			b1 /= Denom;
-			b2 /= Denom;
+			b0 *= InvDenom;
+			b1 *= InvDenom;
+			b2 *= InvDenom;
+
+			// 重心座標系でz値を求める
+			const auto Depth = (b0 * p0.z) + (b1 * p1.z) + (b2 * p2.z);
+			auto& DepthBuf = pDepthBuffer[x_offset];
+			if (Depth >= DepthBuf) continue;
+			DepthBuf = Depth;
 
 			// 重心座標系で法線を求める
 			Vector3 Normal = {
@@ -202,6 +177,7 @@ void Renderer::RasterizeTriangle(InternalVertex v0, InternalVertex v1, InternalV
 			ColorBuff.b = Brightness;
 		}
 
+		pDepthBuffer += SCREEN_WIDTH;
 		pColorBuffer += SCREEN_WIDTH;
 	}
 }

@@ -63,6 +63,7 @@ struct RenderMeshData
 //
 //======================================================================================================
 typedef FrameBuffer<Color>			ColorBuffer;
+typedef FrameBuffer<fp32>			DepthBuffer;
 
 //======================================================================================================
 //
@@ -70,6 +71,7 @@ typedef FrameBuffer<Color>			ColorBuffer;
 class Renderer
 {
 	ColorBuffer*				_pColorBuffer;
+	DepthBuffer*				_pDepthBuffer;
 	std::vector<RenderMeshData>	_RenderMeshDatas;
 	Matrix						_ViewMatrix;
 	Matrix						_ProjMatrix;
@@ -142,7 +144,7 @@ private:
 	void RenderTriangle(const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
 
 public:
-	void BeginDraw(ColorBuffer* pColorBuffer, const Matrix& mView, const Matrix& mProj);
+	void BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, const Matrix& mView, const Matrix& mProj);
 	void EndDraw();
 	void SetDirectionalLight(const Vector3& Direction);
 

@@ -46,7 +46,7 @@ public:
 	void OnFinalize();
 
 	void OnUpdate(fp32 FrameTime);
-	void OnRendering(ColorBuffer* pColorBuffer);
+	void OnRendering(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer);
 
 	void OnLefeMouseDrag(int32 x, int32 y);
 	void OnRightMouseDrag(int32 x, int32 y);
