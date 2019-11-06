@@ -24,7 +24,7 @@ bool Application::OnInitialize()
 	_pRenderer = new Renderer();
 
 	// カメラの初期状態
-	_CameraDistance = 20.0f;
+	_CameraDistance = 9.65f;
 	Vector_Set(_CameraTarget, 0.0f, 3.0f, 0.0f, 1.0f);
 	Vector_Set(_CameraAngle, -0.29f, 1.76f, 0.0f, 0.0f);
 

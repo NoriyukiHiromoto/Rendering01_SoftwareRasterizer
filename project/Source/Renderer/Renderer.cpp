@@ -91,11 +91,21 @@ void Renderer::DrawIndexed(const IMeshData* pMeshData, const Matrix& mWorld)
 //======================================================================================================
 void Renderer::RenderTriangle(const IMeshData* pMeshData, const Vector4 Positions[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount)
 {
+	static const uint8 index_table[8][8] = {
+		{ 0, 0, 0, 0, 0, 0, 0 },	// 0: -
+		{ 0, 0, 0, 0, 0, 0, 0 },	// 1: 0
+		{ 1, 0, 0, 0, 0, 0, 0 },	// 2: 0 1 0
+		{ 1, 2, 0, 0, 0, 0, 0 },	// 3: 0 1 2 0
+		{ 1, 2, 3, 0, 0, 0, 0 },	// 4: 0 1 2 3 0
+		{ 1, 2, 3, 4, 0, 0, 0 },	// 5: 0 1 2 3 4 0
+		{ 1, 2, 3, 4, 5, 0, 0 },	// 6: 0 1 2 3 4 5 0
+		{ 1, 2, 3, 4, 5, 6, 0 },	// 7: 0 1 2 3 4 5 6 0
+	};
+
 	const auto WidthF  = SCREEN_WIDTH_F  - 1.0f;
 	const auto HeightF = SCREEN_HEIGHT_F - 1.0f;
 
-	const int32 PointCount = 3;
-	Vector4 Temp[PointCount];
+	Vector4 TempA[8], TempB[8];
 
 	auto index = 0;
 	while (index < IndexCount)
@@ -104,37 +114,35 @@ void Renderer::RenderTriangle(const IMeshData* pMeshData, const Vector4 Position
 		const auto i1 = pIndex[index++];
 		const auto i2 = pIndex[index++];
 
-		Temp[0] = Positions[i0];
-		Temp[1] = Positions[i1];
-		Temp[2] = Positions[i2];
+		TempA[0] = Positions[i0];
+		TempA[1] = Positions[i1];
+		TempA[2] = Positions[i2];
+		int32 PointCount = 3;
 
-		// 画面外にはみ出すポリゴンは破棄する
-		if (Temp[0].w <= 0.0f) continue;
-		if (Temp[1].w <= 0.0f) continue;
-		if (Temp[2].w <= 0.0f) continue;
-		if (Temp[0].x < -Temp[0].w) continue;
-		if (Temp[1].x < -Temp[1].w) continue;
-		if (Temp[2].x < -Temp[2].w) continue;
-		if (Temp[0].x > +Temp[0].w) continue;
-		if (Temp[1].x > +Temp[1].w) continue;
-		if (Temp[2].x > +Temp[2].w) continue;
-		if (Temp[0].y < -Temp[0].w) continue;
-		if (Temp[1].y < -Temp[1].w) continue;
-		if (Temp[2].y < -Temp[2].w) continue;
-		if (Temp[0].y > +Temp[0].w) continue;
-		if (Temp[1].y > +Temp[1].w) continue;
-		if (Temp[2].y > +Temp[2].w) continue;
+		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.y; });
+		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.y; });
+		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.x; });
+		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.x; });
+		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.z; });
+		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.z; });
 
 		for (int32 j = 0; j < PointCount; ++j)
 		{
-			auto& pt = Temp[j];
+			auto& pt = TempA[j];
 			pt.x = (+pt.x / pt.w * 0.5f + 0.5f) * WidthF;
 			pt.y = (-pt.y / pt.w * 0.5f + 0.5f) * HeightF;
 		}
 
-		DrawLine(int32(Temp[0].x + 0.5f), int32(Temp[0].y + 0.5f), int32(Temp[1].x + 0.5f), int32(Temp[1].y + 0.5f));
-		DrawLine(int32(Temp[1].x + 0.5f), int32(Temp[1].y + 0.5f), int32(Temp[2].x + 0.5f), int32(Temp[2].y + 0.5f));
-		DrawLine(int32(Temp[2].x + 0.5f), int32(Temp[2].y + 0.5f), int32(Temp[0].x + 0.5f), int32(Temp[0].y + 0.5f));
+		auto table = index_table[PointCount];
+		auto& cv0 = TempA[0];
+		for (int32 j = 1; j < PointCount - 1; ++j)
+		{
+			auto& cv1 = TempA[j];
+			auto& cv2 = TempA[table[j]];	// [(i + 1) % PointCount]
+			DrawLine(int32(cv0.x + 0.5f), int32(cv0.y + 0.5f), int32(cv1.x + 0.5f), int32(cv1.y + 0.5f));
+			DrawLine(int32(cv1.x + 0.5f), int32(cv1.y + 0.5f), int32(cv2.x + 0.5f), int32(cv2.y + 0.5f));
+			DrawLine(int32(cv2.x + 0.5f), int32(cv2.y + 0.5f), int32(cv0.x + 0.5f), int32(cv0.y + 0.5f));
+		}
 	}
 }
 

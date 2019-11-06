@@ -61,6 +61,7 @@ typedef FrameBuffer<Color>			ColorBuffer;
 class Renderer
 {
 	ColorBuffer*				_pColorBuffer;
+	Vector3						_DirectionalLight;
 	std::vector<RenderMeshData>	_RenderMeshDatas;
 	Matrix						_ViewMatrix;
 	Matrix						_ProjMatrix;
@@ -70,6 +71,61 @@ public:
 	~Renderer();
 
 private:
+	template <typename FUNC>
+	int32 ClipPoints(Vector4 Dst[], const Vector4 Src[], const int32 PointCount, FUNC Compare)
+	{
+		static const uint8 index_table[8][8] = {
+			{ 0, 0, 0, 0, 0, 0, 0 },	// 0: -
+			{ 0, 0, 0, 0, 0, 0, 0 },	// 1: 0
+			{ 1, 0, 0, 0, 0, 0, 0 },	// 2: 0 1 0
+			{ 1, 2, 0, 0, 0, 0, 0 },	// 3: 0 1 2 0
+			{ 1, 2, 3, 0, 0, 0, 0 },	// 4: 0 1 2 3 0
+			{ 1, 2, 3, 4, 0, 0, 0 },	// 5: 0 1 2 3 4 0
+			{ 1, 2, 3, 4, 5, 0, 0 },	// 6: 0 1 2 3 4 5 0
+			{ 1, 2, 3, 4, 5, 6, 0 },	// 7: 0 1 2 3 4 5 6 0
+		};
+		auto table = index_table[PointCount];
+
+		int32 NewPointCount = 0;
+
+		for (int32 i = 0; i < PointCount; ++i)
+		{
+			const auto& v1 = Src[i];
+			const auto& v2 = Src[table[i]];	// [(i + 1) % PointCount]
+
+			const auto d1 = Compare(v1);
+			const auto d2 = Compare(v2);
+
+			const auto Intersect = [&](Vector4& v)
+			{
+				const fp32 rate = d1 / (d1 - d2);
+				Vector_Lerp(v, v1, v2, rate);
+			};
+
+			if (d1 > 0.0f)
+			{
+				if (d2 > 0.0f)
+				{
+					Dst[NewPointCount++] = v2;
+				}
+				else
+				{
+					Intersect(Dst[NewPointCount++]);
+				}
+			}
+			else
+			{
+				if (d2 > 0.0f)
+				{
+					Intersect(Dst[NewPointCount++]);
+					Dst[NewPointCount++] = v2;
+				}
+			}
+		}
+
+		return NewPointCount;
+	}
+
 	void RenderTriangle(const IMeshData* pMeshData, const Vector4 Positions[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
 	void DrawLine(int32 x0, int32 y0, int32 x1, int32 y1);
 
