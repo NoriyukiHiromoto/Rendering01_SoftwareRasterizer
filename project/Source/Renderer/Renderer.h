@@ -29,19 +29,28 @@ struct IMeshData
 	virtual const int32 GetIndexCount() const = 0;
 
 	virtual const Vector3* const GetPosition() const = 0;
+	virtual const Vector3* const GetNormal() const = 0;
 	virtual const uint16* const GetIndex() const = 0;
 };
 
 struct MeshData : public IMeshData
 {
 	std::vector<Vector3>	_Position;
+	std::vector<Vector3>	_Normal;
 	std::vector<uint16>		_Index;
 
 	virtual const int32 GetVertexCount() const { return int32(_Position.size()); }
 	virtual const int32 GetIndexCount() const { return int32(_Index.size()); }
 
 	virtual const Vector3* const GetPosition() const { return &_Position[0]; }
+	virtual const Vector3* const GetNormal() const { return &_Normal[0]; }
 	virtual const uint16* const GetIndex() const { return &_Index[0]; }
+};
+
+struct InternalVertex
+{
+	Vector4		Position;
+	Vector3		Normal;
 };
 
 struct RenderMeshData
@@ -61,10 +70,10 @@ typedef FrameBuffer<Color>			ColorBuffer;
 class Renderer
 {
 	ColorBuffer*				_pColorBuffer;
-	Vector3						_DirectionalLight;
 	std::vector<RenderMeshData>	_RenderMeshDatas;
 	Matrix						_ViewMatrix;
 	Matrix						_ProjMatrix;
+	Vector3						_DirectionalLight;
 
 public:
 	Renderer();
@@ -72,7 +81,7 @@ public:
 
 private:
 	template <typename FUNC>
-	int32 ClipPoints(Vector4 Dst[], const Vector4 Src[], const int32 PointCount, FUNC Compare)
+	int32 ClipPoints(InternalVertex Dst[], const InternalVertex Src[], const int32 PointCount, FUNC Compare)
 	{
 		static const uint8 index_table[8][8] = {
 			{ 0, 0, 0, 0, 0, 0, 0 },	// 0: -
@@ -93,13 +102,14 @@ private:
 			const auto& v1 = Src[i];
 			const auto& v2 = Src[table[i]];	// [(i + 1) % PointCount]
 
-			const auto d1 = Compare(v1);
-			const auto d2 = Compare(v2);
+			const auto d1 = Compare(v1.Position);
+			const auto d2 = Compare(v2.Position);
 
-			const auto Intersect = [&](Vector4& v)
+			const auto Intersect = [&](InternalVertex& v)
 			{
 				const fp32 rate = d1 / (d1 - d2);
-				Vector_Lerp(v, v1, v2, rate);
+				Vector_Lerp(v.Position, v1.Position, v2.Position, rate);
+				Vector_Lerp(v.Normal, v1.Normal, v2.Normal, rate);
 			};
 
 			if (d1 > 0.0f)
@@ -126,12 +136,15 @@ private:
 		return NewPointCount;
 	}
 
-	void RenderTriangle(const IMeshData* pMeshData, const Vector4 Positions[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
-	void DrawLine(int32 x0, int32 y0, int32 x1, int32 y1);
+	fp32 EdgeFunc(const Vector2& a, const Vector2& b, const Vector2& c);
+	fp32 EdgeFunc(const fp32 ax, const fp32 ay, const fp32 bx, const fp32 by, const fp32 cx, const fp32 cy);
+	void RasterizeTriangle(InternalVertex v0, InternalVertex v1, InternalVertex v2);
+	void RenderTriangle(const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
 
 public:
 	void BeginDraw(ColorBuffer* pColorBuffer, const Matrix& mView, const Matrix& mProj);
 	void EndDraw();
+	void SetDirectionalLight(const Vector3& Direction);
 
 	void DrawIndexed(const IMeshData* pMeshData, const Matrix& mWorld);
 };

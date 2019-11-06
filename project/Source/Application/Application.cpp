@@ -73,6 +73,8 @@ void Application::OnRendering(ColorBuffer* pColorBuffer)
 	_VertexCount = 0;
 	_TriangleCount = 0;
 
+	_pRenderer->SetDirectionalLight(Vector3{ 1.0f, -2.0f, 5.0f });
+
 	// 描画を開始する
 	_pRenderer->BeginDraw(pColorBuffer, _mView, _mProj);
 
@@ -168,6 +170,7 @@ void Application::ModelLoad(const char* pFileName)
 				for (auto&& v : VertexDatas)
 				{
 					Dst._Position.push_back(Vector3{ v.Position[0], v.Position[1], v.Position[2] });
+					Dst._Normal.push_back(Vector3{ v.Normal[0], v.Normal[1], v.Normal[2] });
 					Dst._Index.push_back(Index++);
 				}
 			}
