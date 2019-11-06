@@ -71,6 +71,7 @@ public:
 
 private:
 	void RenderTriangle(const IMeshData* pMeshData, const Vector4 Positions[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
+	void DrawLine(int32 x0, int32 y0, int32 x1, int32 y1);
 
 public:
 	void BeginDraw(ColorBuffer* pColorBuffer, const Matrix& mView, const Matrix& mProj);
