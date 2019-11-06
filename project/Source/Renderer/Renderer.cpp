@@ -120,9 +120,9 @@ void Renderer::RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVe
 	if (Denom <= 0.0f) return;
 
 	const auto InvDenom = 1.0f / Denom;
-	p0.z /= p0.w;
-	p1.z /= p1.w;
-	p2.z /= p2.w;
+	p0.z *= p0.w;
+	p1.z *= p1.w;
+	p2.z *= p2.w;
 
 	// ポリゴンのバウンディングを求める
 	auto bbMinX = p0.x, bbMinY = p0.y, bbMaxX = p0.x, bbMaxY = p0.y;
@@ -184,10 +184,14 @@ void Renderer::RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVe
 
 			const auto Brightness = uint32(NdotL * 128.0f);
 
+			// 重心座標系でwを求める
+			const auto w = 1.0f / ((b0 * p0.w) + (b1 * p1.w) + (b2 * p2.w));
+
 			// 重心座標系でUVを求める
+			// パースペクティブコレクト対応のため1/wする
 			Vector2 TexCoord = {
-				((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)),
-				((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)),
+				((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)) * w,
+				((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)) * w,
 			};
 
 			// 求めたUVからテクスチャの色をとってくる
@@ -302,8 +306,12 @@ void Renderer::RenderTriangle(uint16_t TextureId, const IMeshData* pMeshData, co
 		for (int32 j = 0; j < PointCount; ++j)
 		{
 			auto& pt = TempA[j];
-			pt.Position.x = (+pt.Position.x / pt.Position.w * 0.5f + 0.5f) * WidthF;
-			pt.Position.y = (-pt.Position.y / pt.Position.w * 0.5f + 0.5f) * HeightF;
+			auto invW = 1.0f / pt.Position.w;
+			pt.Position.x = (+pt.Position.x * invW * 0.5f + 0.5f) * WidthF;
+			pt.Position.y = (-pt.Position.y * invW * 0.5f + 0.5f) * HeightF;
+			pt.Position.w = invW;
+			pt.TexCoord.x *= invW;
+			pt.TexCoord.y *= invW;
 		}
 
 		auto table = index_table[PointCount];
