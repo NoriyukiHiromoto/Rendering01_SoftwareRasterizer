@@ -81,6 +81,7 @@ void Application::OnRendering(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuff
 	// メッシュの描画
 	for (auto&& Mesh : _MeshDatas)
 	{
+		_pRenderer->SetTexture(Mesh._Texture);
 		_pRenderer->DrawIndexed(&Mesh, Matrix::IDENTITY);
 
 		_VertexCount += Mesh.GetVertexCount();
@@ -161,6 +162,9 @@ void Application::ModelLoad(const char* pFileName)
 				MeshFileBinary MeshBin;
 				::ReadFile(hFile, &MeshBin, sizeof(MeshBin), &ReadedBytes, nullptr);
 
+				// テクスチャの読み込み
+				Dst._Texture.Load((Dir + MeshBin.TextureName + ".dds").c_str());
+
 				// ジオメトリデータ読み込み
 				std::vector<VertexData> VertexDatas(MeshBin.TriangleVertexCount);
 				::ReadFile(hFile, &(VertexDatas[0]), sizeof(VertexData) * MeshBin.TriangleVertexCount, &ReadedBytes, nullptr);
@@ -171,6 +175,7 @@ void Application::ModelLoad(const char* pFileName)
 				{
 					Dst._Position.push_back(Vector3{ v.Position[0], v.Position[1], v.Position[2] });
 					Dst._Normal.push_back(Vector3{ v.Normal[0], v.Normal[1], v.Normal[2] });
+					Dst._TexCoord.push_back(Vector2{ v.TexCoord[0], v.TexCoord[1] });
 					Dst._Index.push_back(Index++);
 				}
 			}

@@ -271,7 +271,7 @@ int32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int32)
 	DIBBuffer DIBBuff;
 	DIBBuff.Create(hWnd, hWindowDC, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-	ColorBuffer ColorBuff(DIBBuff.Surface(), SCREEN_WIDTH, SCREEN_HEIGHT);
+	ColorBuffer ColorBuff(DIBBuff.Surface(), DIBBuff.Width(), DIBBuff.Height());
 	DepthBuffer DepthBuff(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT);
 
 	ColorBuff.Clear(0xFF000000);

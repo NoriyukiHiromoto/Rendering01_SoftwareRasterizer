@@ -25,6 +25,7 @@
     <ClCompile Include="Source\Misc\Timer.cpp" />
     <ClCompile Include="Source\Renderer\FrameBuffer.cpp" />
     <ClCompile Include="Source\Renderer\Renderer.cpp" />
+    <ClCompile Include="Source\Renderer\Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Application\Application.h" />
@@ -33,6 +34,7 @@
     <ClInclude Include="Source\Misc\Timer.h" />
     <ClInclude Include="Source\Renderer\FrameBuffer.h" />
     <ClInclude Include="Source\Renderer\Renderer.h" />
+    <ClInclude Include="Source\Renderer\Texture.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>

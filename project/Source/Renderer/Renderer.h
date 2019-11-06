@@ -19,31 +19,40 @@
 //======================================================================================================
 #include <Math/Math.h>
 #include <Renderer/FrameBuffer.h>
+#include <Renderer/Texture.h>
 
 //======================================================================================================
 //
 //======================================================================================================
 struct IMeshData
 {
+	virtual const Texture* GetTexture() const = 0;
+
 	virtual const int32 GetVertexCount() const = 0;
 	virtual const int32 GetIndexCount() const = 0;
 
 	virtual const Vector3* const GetPosition() const = 0;
 	virtual const Vector3* const GetNormal() const = 0;
+	virtual const Vector2* const GetTexCoord() const = 0;
 	virtual const uint16* const GetIndex() const = 0;
 };
 
 struct MeshData : public IMeshData
 {
+	Texture					_Texture;
 	std::vector<Vector3>	_Position;
 	std::vector<Vector3>	_Normal;
+	std::vector<Vector2>	_TexCoord;
 	std::vector<uint16>		_Index;
+
+	virtual const Texture* GetTexture() const { return &_Texture; }
 
 	virtual const int32 GetVertexCount() const { return int32(_Position.size()); }
 	virtual const int32 GetIndexCount() const { return int32(_Index.size()); }
 
 	virtual const Vector3* const GetPosition() const { return &_Position[0]; }
 	virtual const Vector3* const GetNormal() const { return &_Normal[0]; }
+	virtual const Vector2* const GetTexCoord() const { return &_TexCoord[0]; }
 	virtual const uint16* const GetIndex() const { return &_Index[0]; }
 };
 
@@ -51,11 +60,13 @@ struct InternalVertex
 {
 	Vector4		Position;
 	Vector3		Normal;
+	Vector2		TexCoord;
 };
 
 struct RenderMeshData
 {
 	const IMeshData*	pMeshData;
+	uint16				TextureId;
 	Matrix				mWorld;
 };
 
@@ -76,6 +87,10 @@ class Renderer
 	Matrix						_ViewMatrix;
 	Matrix						_ProjMatrix;
 	Vector3						_DirectionalLight;
+	Texture						_DummyTexture;
+	Texture*					_CurrentTexture;
+	std::vector<Texture*>		_Textures;
+	uint16						_CurrentTextureId;
 
 public:
 	Renderer();
@@ -112,6 +127,7 @@ private:
 				const fp32 rate = d1 / (d1 - d2);
 				Vector_Lerp(v.Position, v1.Position, v2.Position, rate);
 				Vector_Lerp(v.Normal, v1.Normal, v2.Normal, rate);
+				Vector_Lerp(v.TexCoord, v1.TexCoord, v2.TexCoord, rate);
 			};
 
 			if (d1 > 0.0f)
@@ -140,12 +156,13 @@ private:
 
 	fp32 EdgeFunc(const Vector2& a, const Vector2& b, const Vector2& c);
 	fp32 EdgeFunc(const fp32 ax, const fp32 ay, const fp32 bx, const fp32 by, const fp32 cx, const fp32 cy);
-	void RasterizeTriangle(InternalVertex v0, InternalVertex v1, InternalVertex v2);
-	void RenderTriangle(const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
+	void RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2);
+	void RenderTriangle(uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
 
 public:
 	void BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, const Matrix& mView, const Matrix& mProj);
 	void EndDraw();
+	void SetTexture(Texture& Texture);
 	void SetDirectionalLight(const Vector3& Direction);
 
 	void DrawIndexed(const IMeshData* pMeshData, const Matrix& mWorld);
