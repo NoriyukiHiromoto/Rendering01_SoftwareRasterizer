@@ -179,11 +179,18 @@ Color Texture::Sample(fp32 u, fp32 v) const
 
 	const auto uf = u * fp32(Src.Width);
 	const auto vf = v * fp32(Src.Height);
-	const auto ui = int32(uf);
-	const auto vi = int32(vf);
+	const auto ui0 = int32(uf);
+	const auto vi0 = int32(vf);
 
-	const auto mui = ui % Src.Width;
-	const auto mvi = vi % Src.Height;
+	const auto mui0 = ui0 % Src.Width;
+	const auto mui1 = (ui0 + 1) % Src.Width;
+	const auto mvi0 = vi0 % Src.Height;
+	const auto mvi1 = (vi0 + 1) % Src.Height;
 
-	return Src.Color[mui + (mvi * Src.Width)];
+	const auto x0y0 = Src.Color[mui0 + (mvi0 * Src.Width)];
+	const auto x1y0 = Src.Color[mui1 + (mvi0 * Src.Width)];
+	const auto x0y1 = Src.Color[mui0 + (mvi1 * Src.Width)];
+	const auto x1y1 = Src.Color[mui1 + (mvi1 * Src.Width)];
+
+	return Color::Lerp(x0y0, x1y0, x0y1, x1y1, uf - fp32(ui0), vf - fp32(vi0));
 }
