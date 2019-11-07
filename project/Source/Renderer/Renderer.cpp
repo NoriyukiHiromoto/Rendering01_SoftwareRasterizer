@@ -143,10 +143,13 @@ void Renderer::RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVe
 	auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(x0, y0);
 	auto pColorBuffer = _pColorBuffer->GetPixelPointer(x0, y0);
 
+	fp32 LastU = 0.0f, LastV = 0.0f;
+
 	// 求めたバウンディング内をforで回す
 	fp32 py = fp32(y0) + 0.5f;
 	for (int32 y = y0; y <= y1; ++y, py += 1.0f)
 	{
+		bool bFirstSampling = true;
 		int32 x_offset = 0;
 		fp32 px = fp32(x0) + 0.5f;
 		for (auto x = x0; x <= x1; ++x, px += 1.0f, ++x_offset)
@@ -196,7 +199,12 @@ void Renderer::RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVe
 
 			// 求めたUVからテクスチャの色をとってくる
 			auto pTexture = _Textures[TextureId];
-			Color texel = pTexture->Sample(TexCoord.x, TexCoord.y);
+			Color texel = bFirstSampling
+				? pTexture->Sample(TexCoord.x, TexCoord.y)
+				: pTexture->Sample(TexCoord.x, TexCoord.y, LastU - TexCoord.x, LastV - TexCoord.y);
+			bFirstSampling = false;
+			LastU = TexCoord.x;
+			LastV = TexCoord.y;
 
 			// テクスチャの色にライtの結果を乗算
 			auto& ColorBuff = pColorBuffer[x_offset];

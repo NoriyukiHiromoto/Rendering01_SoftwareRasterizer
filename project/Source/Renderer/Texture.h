@@ -78,4 +78,5 @@ public:
 	}
 
 	virtual Color Sample(fp32 u, fp32 v) const;
+	virtual Color Sample(fp32 u, fp32 v, fp32 du, fp32 dv) const;
 };

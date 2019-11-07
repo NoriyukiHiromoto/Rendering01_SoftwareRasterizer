@@ -95,6 +95,17 @@ union Color
 	{
 	}
 
+	static Color Lerp(Color lhs, Color rhs, fp32 rate)
+	{
+		// result
+		Color result;
+		result.r = uint8(lhs.r + fp32(rhs.r - lhs.r) * rate);
+		result.g = uint8(lhs.g + fp32(rhs.g - lhs.g) * rate);
+		result.b = uint8(lhs.b + fp32(rhs.b - lhs.b) * rate);
+		result.a = uint8(lhs.a + fp32(rhs.a - lhs.a) * rate);
+		return result;
+	}
+
 	static Color Lerp(Color x0y0, Color x1y0, Color x0y1, Color x1y1, fp32 rateX, fp32 rateY)
 	{
 		// y0
