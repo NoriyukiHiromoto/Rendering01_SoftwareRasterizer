@@ -35,8 +35,8 @@ Texture::~Texture()
 //======================================================================================================
 void Texture::Release()
 {
-	_Width = 0;
-	_Height = 0;
+	_WidthF = 0.0f;
+	_HeightF = 0.0f;
 	_SurfaceCount = 0;
 	memset(_Surface, 0, sizeof(_Surface));
 }
@@ -53,6 +53,24 @@ bool Texture::Create(int32 w, int32 h, int32 level)
 	Src.Width = w;
 	Src.Height = h;
 
+	Src.WidthF = fp32(Src.Width);
+	Src.HeightF = fp32(Src.Height);
+
+	Src.UMask = Src.Width - 1;
+	Src.VMask = Src.Height - 1;
+
+	Src.UBit = 0;
+	while ((1 << Src.UBit) != Src.Width)
+	{
+		Src.UBit++;
+	}
+
+	Src.VBit = 0;
+	while ((1 << Src.VBit) != Src.Height)
+	{
+		Src.VBit++;
+	}
+
 	return true;
 }
 
@@ -63,8 +81,8 @@ bool Texture::Create(int32 w, int32 h)
 {
 	Release();
 
-	_Width = w;
-	_Height = h;
+	_WidthF  = fp32(w);
+	_HeightF = fp32(h);
 	_SurfaceCount = 1;
 	return Create(w, h, 0);
 }
@@ -130,8 +148,8 @@ bool Texture::Load(const char* pFileName)
 	if (DDSHeader.ddpfTexelFormat.dwGBitMask != 0x0000FF00) goto EXIT;
 	if (DDSHeader.ddpfTexelFormat.dwBBitMask != 0x000000FF) goto EXIT;
 
-	_Width = DDSHeader.dwWidth;
-	_Height = DDSHeader.dwHeight;
+	_WidthF  = fp32(DDSHeader.dwWidth);
+	_HeightF = fp32(DDSHeader.dwHeight);
 	_SurfaceCount = std::max(1, int32(DDSHeader.dwMipMapCount) - 2);
 	for (int32 i = 0; i < _SurfaceCount; ++i)
 	{
@@ -175,24 +193,28 @@ Color Texture::Sample(fp32 u, fp32 v) const
 	u += 256.0f;
 	v += 256.0f;
 
-	const auto& Src = _Surface[0];
+	const auto level = 0;
+	const auto& Src = _Surface[std::min(level, _SurfaceCount - 1)];
 
-	const auto uf = u * fp32(Src.Width);
-	const auto vf = v * fp32(Src.Height);
+	const auto uf = u * Src.WidthF;
+	const auto vf = v * Src.HeightF;
 	const auto ui0 = int32(uf);
 	const auto vi0 = int32(vf);
 
-	const auto mui0 = ui0 % Src.Width;
-	const auto mui1 = (ui0 + 1) % Src.Width;
-	const auto mvi0 = vi0 % Src.Height;
-	const auto mvi1 = (vi0 + 1) % Src.Height;
+	const auto mui0 = ui0 & Src.UMask;
+	const auto mui1 = (ui0 + 1) & Src.UMask;
+	const auto mvi0 = vi0 & Src.VMask;
+	const auto mvi1 = (vi0 + 1) & Src.VMask;
 
-	const auto x0y0 = Src.Color[mui0 + (mvi0 * Src.Width)];
-	const auto x1y0 = Src.Color[mui1 + (mvi0 * Src.Width)];
-	const auto x0y1 = Src.Color[mui0 + (mvi1 * Src.Width)];
-	const auto x1y1 = Src.Color[mui1 + (mvi1 * Src.Width)];
+	const auto x0y0 = Src.Color[mui0 + (mvi0 << Src.UBit)];
+	const auto x1y0 = Src.Color[mui1 + (mvi0 << Src.UBit)];
+	const auto x0y1 = Src.Color[mui0 + (mvi1 << Src.UBit)];
+	const auto x1y1 = Src.Color[mui1 + (mvi1 << Src.UBit)];
 
-	return Color::Lerp(x0y0, x1y0, x0y1, x1y1, uf - fp32(ui0), vf - fp32(vi0));
+	const auto rateU = uf - fp32(ui0);
+	const auto rateV = vf - fp32(vi0);
+
+	return Color::Lerp(x0y0, x1y0, x0y1, x1y1, rateU, rateV);
 }
 
 //======================================================================================================
@@ -200,45 +222,50 @@ Color Texture::Sample(fp32 u, fp32 v) const
 //======================================================================================================
 Color Texture::Sample(fp32 u, fp32 v, fp32 du, fp32 dv) const
 {
-	u += 256.0f;
-	v += 256.0f;
-
-	auto BilinearFiltering = [](const Surface& Src, fp32 u, fp32 v) {
-		const auto uf = u * fp32(Src.Width);
-		const auto vf = v * fp32(Src.Height);
+	auto BilinearFilter = [](const Surface& Image, fp32 u, fp32 v) {
+		const auto uf = u * Image.WidthF;
+		const auto vf = v * Image.HeightF;
 		const auto ui0 = int32(uf);
 		const auto vi0 = int32(vf);
 
-		const auto mui0 = ui0 % Src.Width;
-		const auto mui1 = (ui0 + 1) % Src.Width;
-		const auto mvi0 = vi0 % Src.Height;
-		const auto mvi1 = (vi0 + 1) % Src.Height;
+		const auto mui0 = ui0 & Image.UMask;
+		const auto mui1 = (ui0 + 1) & Image.UMask;
+		const auto mvi0 = vi0 & Image.VMask;
+		const auto mvi1 = (vi0 + 1) & Image.VMask;
 
-		const auto x0y0 = Src.Color[mui0 + (mvi0 * Src.Width)];
-		const auto x1y0 = Src.Color[mui1 + (mvi0 * Src.Width)];
-		const auto x0y1 = Src.Color[mui0 + (mvi1 * Src.Width)];
-		const auto x1y1 = Src.Color[mui1 + (mvi1 * Src.Width)];
+		const auto x0y0 = Image.Color[mui0 + (mvi0 << Image.UBit)];
+		const auto x1y0 = Image.Color[mui1 + (mvi0 << Image.UBit)];
+		const auto x0y1 = Image.Color[mui0 + (mvi1 << Image.UBit)];
+		const auto x1y1 = Image.Color[mui1 + (mvi1 << Image.UBit)];
 
-		return Color::Lerp(x0y0, x1y0, x0y1, x1y1, uf - fp32(ui0), vf - fp32(vi0));
+		const auto rateU = uf - fp32(ui0);
+		const auto rateV = vf - fp32(vi0);
+
+		return Color::Lerp(x0y0, x1y0, x0y1, x1y1, rateU, rateV);
 	};
 
+	u += 256.0f;
+	v += 256.0f;
+
 	// 基準になるミップレベルを求める
-	const auto ddx = du * fp32(_Width);
-	const auto ddy = dv * fp32(_Height);
+	const auto ddx = du * _WidthF;
+	const auto ddy = dv * _HeightF;
 	const auto ddxy = std::max(abs(ddx), abs(ddy));
 	const auto level_base = std::max(log2f(ddxy), 0.0f);
+
 	// 小数部分からブレンド率を求める
 	const auto level_rate = level_base - floorf(level_base);
+
 	// 基準のレベルとブレンド対象のレベルを求める
 	const auto max_mip_level = _SurfaceCount - 1;
 	const auto levelA = std::min(max_mip_level, (int32)level_base);
 	const auto levelB = std::min(max_mip_level, levelA + 1);
 
-	// ２つのレベルのバイリニアフィルタリングの結果をさらにブレンド
-	const auto& SrcA = _Surface[levelA];
-	const auto& SrcB = _Surface[levelB];
+	const auto& ImageA = _Surface[levelA];
+	const auto& ImageB = _Surface[levelB];
+
 	return Color::Lerp(
-		BilinearFiltering(SrcA, u, v),
-		BilinearFiltering(SrcB, u, v),
+		BilinearFilter(ImageA, u, v),
+		BilinearFilter(ImageB, u, v),
 		level_rate);
 }

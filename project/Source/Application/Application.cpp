@@ -133,6 +133,28 @@ void Application::OnWheelMouseDrag(int32 x, int32 y)
 //======================================================================================================
 void Application::ModelLoad(const char* pFileName)
 {
+	// 同一頂点をマージするためのローカル関数
+	std::map<VertexData, uint16> VertexMap;
+	auto AddVertex = [&](VertexData v, MeshData& Dst)
+	{
+		// すでに存在する場合はインデックスを返す
+		auto it = VertexMap.find(v);
+		if (it != VertexMap.end())
+		{
+			return (*it).second;
+		}
+
+		// 新規に追加してそのインデックスを返す
+		const uint16 LocalIndex = uint16(Dst._Position.size());
+
+		Dst._Position.push_back(Vector3{ v.Position[0], v.Position[1], v.Position[2] });
+		Dst._Normal.push_back(Vector3{ v.Normal[0], v.Normal[1], v.Normal[2] });
+		Dst._TexCoord.push_back(Vector2{ v.TexCoord[0], v.TexCoord[1] });
+
+		VertexMap.insert(std::make_pair(v, LocalIndex));
+		return LocalIndex;
+	};
+
 	// ファイルパスの作成
 	std::string FullPath = pFileName;
 	size_t path_i = FullPath.find_last_of("\\") + 1;
@@ -170,13 +192,9 @@ void Application::ModelLoad(const char* pFileName)
 				::ReadFile(hFile, &(VertexDatas[0]), sizeof(VertexData) * MeshBin.TriangleVertexCount, &ReadedBytes, nullptr);
 
 				// 頂点データ＆頂点インデックス
-				uint16_t Index = 0;
 				for (auto&& v : VertexDatas)
 				{
-					Dst._Position.push_back(Vector3{ v.Position[0], v.Position[1], v.Position[2] });
-					Dst._Normal.push_back(Vector3{ v.Normal[0], v.Normal[1], v.Normal[2] });
-					Dst._TexCoord.push_back(Vector2{ v.TexCoord[0], v.TexCoord[1] });
-					Dst._Index.push_back(Index++);
+					Dst._Index.push_back(AddVertex(v, Dst));
 				}
 			}
 		}

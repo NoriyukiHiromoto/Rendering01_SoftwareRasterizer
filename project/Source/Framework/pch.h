@@ -95,37 +95,85 @@ union Color
 	{
 	}
 
-	static Color Lerp(Color lhs, Color rhs, fp32 rate)
+	static void Blend(Color& result, Color value, fp32 rate)
 	{
-		// result
+		const auto rate128 = int32(rate * 128.0f);
+
+		const auto mask_1010 = 0xFF00FF00;
+		const auto mask_0101 = 0x00FF00FF;
+		const auto mask = (uint64(mask_1010) << 24) | uint64(mask_0101);
+
+		const auto packed = (uint64(value.data & mask_1010) << 24) | uint64(value.data & mask_0101);
+		const auto color = ((packed * rate128) >> 7) & mask;
+
+		result.data = uint32(color >> 24) | uint32(color);
+	}
+
+	static Color Lerp(Color l, Color r, fp32 rate)
+	{
+		const auto rate128 = int32(rate * 128.0f);
+		const auto rate128inv = 0x80 - rate128;
+
+		const auto mask_1010 = 0xFF00FF00;
+		const auto mask_0101 = 0x00FF00FF;
+		const auto mask = (uint64(mask_1010) << 24) | uint64(mask_0101);
+
+		auto r_packed = (uint64(r.data & mask_1010) << 24) | uint64(r.data & mask_0101);
+		auto l_packed = (uint64(l.data & mask_1010) << 24) | uint64(l.data & mask_0101);
+
+		r_packed = ((r_packed * rate128) >> 7) & mask;
+		l_packed = ((l_packed * rate128inv) >> 7) & mask;
+
+		const auto color = l_packed + r_packed;
+
 		Color result;
-		result.r = uint8(lhs.r + fp32(rhs.r - lhs.r) * rate);
-		result.g = uint8(lhs.g + fp32(rhs.g - lhs.g) * rate);
-		result.b = uint8(lhs.b + fp32(rhs.b - lhs.b) * rate);
-		result.a = uint8(lhs.a + fp32(rhs.a - lhs.a) * rate);
+		result.data = uint32(color >> 24) | uint32(color);
 		return result;
 	}
 
 	static Color Lerp(Color x0y0, Color x1y0, Color x0y1, Color x1y1, fp32 rateX, fp32 rateY)
 	{
-		// y0
-		Color y0;
-		y0.r = uint8(x0y0.r + fp32(x1y0.r - x0y0.r) * rateX);
-		y0.g = uint8(x0y0.g + fp32(x1y0.g - x0y0.g) * rateX);
-		y0.b = uint8(x0y0.b + fp32(x1y0.b - x0y0.b) * rateX);
-		y0.a = uint8(x0y0.a + fp32(x1y0.a - x0y0.a) * rateX);
-		// y1
-		Color y1;
-		y1.r = uint8(x0y1.r + fp32(x1y1.r - x0y1.r) * rateX);
-		y1.g = uint8(x0y1.g + fp32(x1y1.g - x0y1.g) * rateX);
-		y1.b = uint8(x0y1.b + fp32(x1y1.b - x0y1.b) * rateX);
-		y1.a = uint8(x0y1.a + fp32(x1y1.a - x0y1.a) * rateX);
-		// result
+		// ＿＿＿＿＿
+		// |R|G|B|A|             32bit RGBA
+		// ￣￣￣￣￣
+		//     ↓
+		// ＿＿＿＿＿  ＿＿＿＿＿
+		// |R| |B| |  | |G| |A|  32bit R_G_  32bit _G_A
+		// ￣￣￣￣￣  ￣￣￣￣￣
+		//     ↓
+		// ＿＿＿＿＿＿＿＿
+		// |R| |B| |G| |A|       64bit packed R_B_G_A
+		// ￣￣￣￣￣￣￣￣
+
+		const auto rateX128 = int32(rateX * 128.0f);
+		const auto rateX128inv = 0x80 - rateX128;
+		const auto rateY128 = int32(rateY * 128.0f);
+		const auto rateY128inv = 0x80 - rateY128;
+
+		const auto mask_1010 = 0xFF00FF00;
+		const auto mask_0101 = 0x00FF00FF;
+		const auto mask = (uint64(mask_1010) << 24) | uint64(mask_0101);
+
+		auto x0y0_packed = (uint64(x0y0.data & mask_1010) << 24) | uint64(x0y0.data & mask_0101);
+		auto x1y0_packed = (uint64(x1y0.data & mask_1010) << 24) | uint64(x1y0.data & mask_0101);
+		auto x0y1_packed = (uint64(x0y1.data & mask_1010) << 24) | uint64(x0y1.data & mask_0101);
+		auto x1y1_packed = (uint64(x1y1.data & mask_1010) << 24) | uint64(x1y1.data & mask_0101);
+
+		x1y0_packed = ((x1y0_packed * rateX128) >> 7) & mask;
+		x1y1_packed = ((x1y1_packed * rateX128) >> 7) & mask;
+		x0y0_packed = ((x0y0_packed * rateX128inv) >> 7) & mask;
+		x0y1_packed = ((x0y1_packed * rateX128inv) >> 7) & mask;
+
+		auto y0_packed = x0y0_packed + x1y0_packed;
+		auto y1_packed = x0y1_packed + x1y1_packed;
+
+		y1_packed = ((y1_packed * rateY128) >> 7) & mask;
+		y0_packed = ((y0_packed * rateY128inv) >> 7) & mask;
+
+		const auto color = y0_packed + y1_packed;
+
 		Color result;
-		result.r = uint8(y0.r + fp32(y1.r - y0.r) * rateY);
-		result.g = uint8(y0.g + fp32(y1.g - y0.g) * rateY);
-		result.b = uint8(y0.b + fp32(y1.b - y0.b) * rateY);
-		result.a = uint8(y0.a + fp32(y1.a - y0.a) * rateY);
+		result.data = uint32(color >> 24) | uint32(color);
 		return result;
 	}
 };

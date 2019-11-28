@@ -29,11 +29,17 @@ private:
 		std::vector<Color>	Color;
 		int32				Width;
 		int32				Height;
+		fp32				WidthF;
+		fp32				HeightF;
+		int32				UMask;
+		int32				VMask;
+		int32				UBit;
+		int32				VBit;
 	};
 
 private:
-	int32	_Width;
-	int32	_Height;
+	fp32	_WidthF;
+	fp32	_HeightF;
 	int32	_SurfaceCount;
 	Surface	_Surface[SURFACE_COUNT];
 
