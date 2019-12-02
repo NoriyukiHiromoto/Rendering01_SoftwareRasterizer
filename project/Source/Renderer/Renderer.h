@@ -63,9 +63,18 @@ struct InternalVertex
 	Vector2		TexCoord;
 };
 
+struct GBufferData
+{
+	uint16		TextureId;
+	uint16		TriangleId;
+	Vector3		Normal;
+	Vector2		TexCoord;
+};
+
 struct RenderMeshData
 {
 	const IMeshData*	pMeshData;
+	uint16				TriangleId;
 	uint16				TextureId;
 	Matrix				mWorld;
 };
@@ -75,6 +84,7 @@ struct RenderMeshData
 //======================================================================================================
 typedef FrameBuffer<Color>			ColorBuffer;
 typedef FrameBuffer<fp32>			DepthBuffer;
+typedef FrameBuffer<GBufferData>	GBuffer;
 
 //======================================================================================================
 //
@@ -83,6 +93,7 @@ class Renderer
 {
 	ColorBuffer*				_pColorBuffer;
 	DepthBuffer*				_pDepthBuffer;
+	GBuffer*					_pGBuffer;
 	std::vector<RenderMeshData>	_RenderMeshDatas;
 	Matrix						_ViewMatrix;
 	Matrix						_ProjMatrix;
@@ -91,6 +102,7 @@ class Renderer
 	Texture*					_CurrentTexture;
 	std::vector<Texture*>		_Textures;
 	uint16						_CurrentTextureId;
+	uint16						_CurrentTriangleId;
 
 public:
 	Renderer();
@@ -156,11 +168,12 @@ private:
 
 	fp32 EdgeFunc(const Vector2& a, const Vector2& b, const Vector2& c);
 	fp32 EdgeFunc(const fp32 ax, const fp32 ay, const fp32 bx, const fp32 by, const fp32 cx, const fp32 cy);
-	void RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2);
-	void RenderTriangle(uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
+	void RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2);
+	void RenderTriangle(uint16 TriangleId, uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
+	void DeferredShading(int32 x, int32 y, int32 w, int32 h);
 
 public:
-	void BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, const Matrix& mView, const Matrix& mProj);
+	void BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, GBuffer* pGBuffer, const Matrix& mView, const Matrix& mProj);
 	void EndDraw();
 	void SetTexture(Texture& Texture);
 	void SetDirectionalLight(const Vector3& Direction);

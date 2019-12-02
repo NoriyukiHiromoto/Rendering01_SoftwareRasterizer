@@ -271,11 +271,13 @@ int32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int32)
 	DIBBuffer DIBBuff;
 	DIBBuff.Create(hWnd, hWindowDC, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-	ColorBuffer ColorBuff(DIBBuff.Surface(), DIBBuff.Width(), DIBBuff.Height());
+	ColorBuffer ColorBuff(DIBBuff.Surface(), SCREEN_WIDTH, SCREEN_HEIGHT);
 	DepthBuffer DepthBuff(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT);
+	GBuffer GBuff(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT);
 
 	ColorBuff.Clear(0xFF000000);
 	DepthBuff.Clear(1.0f);
+	GBuff.Clear(GBufferData{ 0xFFFF });
 
 	//--------------------------------------------------------------------------
 	// メッセージループ
@@ -335,6 +337,8 @@ int32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int32)
 			ColorBuff.Clear(0xFF000000);
 			// 深度バッファをクリアする
 			DepthBuff.Clear(1.0f);
+			// Gバッファをクリアする
+			GBuff.Clear(GBufferData{ 0xFFFF });
 
 			// フレームのdeltaを求める
 			static auto PreTime = Timer.GetMicro();
@@ -344,7 +348,7 @@ int32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int32)
 
 			// フレームの更新処理
 			_App.OnUpdate(FrameTime);
-			_App.OnRendering(&ColorBuff, &DepthBuff);
+			_App.OnRendering(&ColorBuff, &DepthBuff, &GBuff);
 		}
 	}
 

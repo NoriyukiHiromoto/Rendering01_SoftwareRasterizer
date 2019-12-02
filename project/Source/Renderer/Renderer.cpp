@@ -36,15 +36,17 @@ Renderer::~Renderer()
 //======================================================================================================
 //
 //======================================================================================================
-void Renderer::BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, const Matrix& mView, const Matrix& mProj)
+void Renderer::BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, GBuffer* pGBuffer, const Matrix& mView, const Matrix& mProj)
 {
 	_pColorBuffer = pColorBuffer;
 	_pDepthBuffer = pDepthBuffer;
+	_pGBuffer = pGBuffer;
 	_ViewMatrix = mView;
 	_ProjMatrix = mProj;
 
 	_RenderMeshDatas.clear();
 
+	_CurrentTriangleId = 0;
 	_CurrentTextureId = 0;
 	_Textures.clear();
 }
@@ -83,6 +85,7 @@ void Renderer::EndDraw()
 			}
 
 			RenderTriangle(
+				Mesh.TriangleId,
 				Mesh.TextureId,
 				Mesh.pMeshData,
 				Positions,
@@ -93,12 +96,18 @@ void Renderer::EndDraw()
 				Mesh.pMeshData->GetIndexCount());
 		}
 	}
+
+	// GBufferの内容をもとにシェーディングを行う処理をする
+	// ・ピクセルごとのマテリアル情報を元にテクスチャマッピングとライティングを行う
+	{
+		DeferredShading(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+	}
 }
 
 //======================================================================================================
 //
 //======================================================================================================
-void Renderer::RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2)
+void Renderer::RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2)
 {
 	// 三角形の各位置
 	auto& p0 = v0.Position;
@@ -120,11 +129,13 @@ void Renderer::RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVe
 	if (Denom <= 0.0f) return;
 
 	const auto InvDenom = 1.0f / Denom;
-	p0.z *= p0.w;
-	p1.z *= p1.w;
-	p2.z *= p2.w;
+	const auto InvDenom_W0 = InvDenom * p0.w;
+	const auto InvDenom_W1 = InvDenom * p1.w;
+	const auto InvDenom_W2 = InvDenom * p2.w;
+	p0.z *= InvDenom_W0;
+	p1.z *= InvDenom_W1;
+	p2.z *= InvDenom_W2;
 
-	// ポリゴンのバウンディングを求める
 	auto bbMinX = p0.x, bbMinY = p0.y, bbMaxX = p0.x, bbMaxY = p0.y;
 	if (bbMaxX < p1.x) bbMaxX = p1.x;
 	if (bbMaxX < p2.x) bbMaxX = p2.x;
@@ -141,80 +152,47 @@ void Renderer::RasterizeTriangle(uint16 TextureId, InternalVertex v0, InternalVe
 	const auto y1 = int16(bbMaxY);
 
 	auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(x0, y0);
-	auto pColorBuffer = _pColorBuffer->GetPixelPointer(x0, y0);
+	auto pGBuffer = _pGBuffer->GetPixelPointer(x0, y0);
 
-	fp32 LastU = 0.0f, LastV = 0.0f;
-
-	// 求めたバウンディング内をforで回す
 	fp32 py = fp32(y0) + 0.5f;
 	for (int32 y = y0; y <= y1; ++y, py += 1.0f)
 	{
-		bool bFirstSampling = true;
+		bool bRasterized = false;
 		int32 x_offset = 0;
 		fp32 px = fp32(x0) + 0.5f;
 		for (auto x = x0; x <= x1; ++x, px += 1.0f, ++x_offset)
 		{
-			// 辺1-2に対して内外判定
 			auto b0 = EdgeFunc(p1.x, p1.y, p2.x, p2.y, px, py);
-			if (b0 < 0.0f) continue;
-			// 辺2-0に対して内外判定
+			if (b0 < 0.0f) if (bRasterized) break; else continue;
 			auto b1 = EdgeFunc(p2.x, p2.y, p0.x, p0.y, px, py);
-			if (b1 < 0.0f) continue;
-			// 辺0-1に対して内外判定
+			if (b1 < 0.0f) if (bRasterized) break; else continue;
 			auto b2 = EdgeFunc(p0.x, p0.y, p1.x, p1.y, px, py);
-			if (b2 < 0.0f) continue;
+			if (b2 < 0.0f) if (bRasterized) break; else continue;
 
-			b0 *= InvDenom;
-			b1 *= InvDenom;
-			b2 *= InvDenom;
+			bRasterized = true;
 
-			// 重心座標系でz値を求める
 			const auto Depth = (b0 * p0.z) + (b1 * p1.z) + (b2 * p2.z);
 			auto& DepthBuf = pDepthBuffer[x_offset];
 			if (Depth >= DepthBuf) continue;
 			DepthBuf = Depth;
 
-			// 重心座標系で法線を求める
-			Vector3 Normal = {
-				((b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x)),
-				((b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y)),
-				((b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z)),
-			};
+			b0 *= InvDenom;
+			b1 *= InvDenom;
+			b2 *= InvDenom;
 
-			// 適当な感じでライティングする
-			Vector_Normalize(Normal, Normal);
-			const auto NdotL = Vector_DotProduct(Normal, _DirectionalLight) * 0.25f + 0.75f;
-
-			const auto Brightness = uint32(NdotL * 128.0f);
-
-			// 重心座標系でwを求める
 			const auto w = 1.0f / ((b0 * p0.w) + (b1 * p1.w) + (b2 * p2.w));
-
-			// 重心座標系でUVを求める
-			// パースペクティブコレクト対応のため1/wする
-			Vector2 TexCoord = {
-				((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)) * w,
-				((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)) * w,
-			};
-
-			// 求めたUVからテクスチャの色をとってくる
-			auto pTexture = _Textures[TextureId];
-			Color texel = bFirstSampling
-				? pTexture->Sample(TexCoord.x, TexCoord.y)
-				: pTexture->Sample(TexCoord.x, TexCoord.y, LastU - TexCoord.x, LastV - TexCoord.y);
-			bFirstSampling = false;
-			LastU = TexCoord.x;
-			LastV = TexCoord.y;
-
-			// テクスチャの色にライtの結果を乗算
-			auto& ColorBuff = pColorBuffer[x_offset];
-			ColorBuff.r = (texel.r * Brightness) >> 7;
-			ColorBuff.g = (texel.g * Brightness) >> 7;
-			ColorBuff.b = (texel.b * Brightness) >> 7;
+			auto& GBuff = pGBuffer[x_offset];
+			GBuff.TextureId = TextureId;
+			GBuff.TriangleId = TriangleId;
+			GBuff.Normal.x = ((b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x)) * w;
+			GBuff.Normal.y = ((b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y)) * w;
+			GBuff.Normal.z = ((b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z)) * w;
+			GBuff.TexCoord.x = ((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)) * w;
+			GBuff.TexCoord.y = ((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)) * w;
 		}
 
 		pDepthBuffer += SCREEN_WIDTH;
-		pColorBuffer += SCREEN_WIDTH;
+		pGBuffer += SCREEN_WIDTH;
 	}
 }
 
@@ -233,6 +211,44 @@ fp32 Renderer::EdgeFunc(const Vector2& a, const Vector2& b, const Vector2& c)
 fp32 Renderer::EdgeFunc(const fp32 ax, const fp32 ay, const fp32 bx, const fp32 by, const fp32 cx, const fp32 cy)
 {
 	return ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax));
+}
+
+//======================================================================================================
+//
+//======================================================================================================
+void Renderer::DeferredShading(int32 x, int32 y, int32 w, int32 h)
+{
+	auto pGPixel = _pGBuffer->GetPixelPointer(x, y);
+	auto pColorBuffer = _pColorBuffer->GetPixelPointer(x, y);
+
+	fp32 LastU = 0.0f, LastV = 0.0f;
+	uint16 TriangleId = 0xFFFF;
+	const int32 count = w * h;
+	for (int32 i = 0; i < count; ++i, ++pGPixel, ++pColorBuffer)
+	{
+		const auto GBuff = *pGPixel;
+
+		auto bChangedTriangle = TriangleId - GBuff.TriangleId;
+		TriangleId = GBuff.TriangleId;
+
+		if (GBuff.TextureId == 0xFFFF) continue;
+
+		Vector3 Normal;
+		Vector_Normalize(Normal, GBuff.Normal);
+		const auto NdotL = Vector_DotProduct(Normal, _DirectionalLight) * 0.25f + 0.75f;
+
+		auto pTexture = _Textures[GBuff.TextureId];
+		Color texel = bChangedTriangle
+			? pTexture->Sample(GBuff.TexCoord.x, GBuff.TexCoord.y)
+			: pTexture->Sample(GBuff.TexCoord.x, GBuff.TexCoord.y, LastU - GBuff.TexCoord.x, LastV - GBuff.TexCoord.y);
+		LastU = GBuff.TexCoord.x;
+		LastV = GBuff.TexCoord.y;
+
+		const auto Brightness = uint32(NdotL * 128.0f);
+		pColorBuffer->r = (texel.r * Brightness) >> 7;
+		pColorBuffer->g = (texel.g * Brightness) >> 7;
+		pColorBuffer->b = (texel.b * Brightness) >> 7;
+	}
 }
 
 //======================================================================================================
@@ -268,13 +284,13 @@ void Renderer::SetDirectionalLight(const Vector3& Direction)
 //======================================================================================================
 void Renderer::DrawIndexed(const IMeshData* pMeshData, const Matrix& mWorld)
 {
-	_RenderMeshDatas.emplace_back(RenderMeshData{ pMeshData, _CurrentTextureId, mWorld });
+	_RenderMeshDatas.emplace_back(RenderMeshData{ pMeshData,_CurrentTriangleId++, _CurrentTextureId, mWorld });
 }
 
 //======================================================================================================
 //
 //======================================================================================================
-void Renderer::RenderTriangle(uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount)
+void Renderer::RenderTriangle(uint16 TriangleId, uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount)
 {
 	static const uint8 index_table[8][8] = {
 		{ 0, 0, 0, 0, 0, 0, 0 },	// 0: -
@@ -328,7 +344,9 @@ void Renderer::RenderTriangle(uint16_t TextureId, const IMeshData* pMeshData, co
 		{
 			auto& cv1 = TempA[j];
 			auto& cv2 = TempA[table[j]];	// [(i + 1) % PointCount]
-			RasterizeTriangle(TextureId, cv0, cv1, cv2);
+			RasterizeTriangle(TriangleId, TextureId, cv0, cv1, cv2);
 		}
+
+		TriangleId++;
 	}
 }

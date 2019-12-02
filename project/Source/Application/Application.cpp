@@ -68,15 +68,15 @@ void Application::OnUpdate(fp32 FrameTime)
 //======================================================================================================
 // レンダリング処理
 //======================================================================================================
-void Application::OnRendering(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer)
+void Application::OnRendering(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, GBuffer* pGBuffer)
 {
 	_VertexCount = 0;
 	_TriangleCount = 0;
 
-	_pRenderer->SetDirectionalLight(Vector3{ 1.0f, -2.0f, 5.0f });
-
 	// 描画を開始する
-	_pRenderer->BeginDraw(pColorBuffer, pDepthBuffer, _mView, _mProj);
+	_pRenderer->BeginDraw(pColorBuffer, pDepthBuffer, pGBuffer, _mView, _mProj);
+
+	_pRenderer->SetDirectionalLight(Vector3{ 1.0f, -2.0f, 5.0f });
 
 	// メッシュの描画
 	for (auto&& Mesh : _MeshDatas)
