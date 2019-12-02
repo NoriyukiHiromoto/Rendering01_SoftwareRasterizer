@@ -560,7 +560,7 @@ Vector4& Vector_Max(Vector4& Result, const Vector4& lhs, const Vector4& rhs)
 //======================================================================================================
 Vector4& Vector_Normalize3(Vector4& Result, const Vector4& Input)
 {
-	const auto Length = Vector_Length(Input);
+	const auto Length = Vector_Length3(Input);
 	const auto InvLength = 1.0f / Length;
 	Result.x = Input.x * InvLength;
 	Result.y = Input.y * InvLength;
