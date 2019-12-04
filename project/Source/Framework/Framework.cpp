@@ -15,6 +15,7 @@
 #include <Application/Application.h>
 #include <Renderer/FrameBuffer.h>
 #include <Misc/Timer.h>
+#include <TaskSystem/TaskSystem.h>
 
 //======================================================================================================
 //
@@ -268,16 +269,39 @@ int32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int32)
 	//--------------------------------------------------------------------------
 	auto hWindowDC = ::GetDC(hWnd);
 
-	DIBBuffer DIBBuff;
-	DIBBuff.Create(hWnd, hWindowDC, SCREEN_WIDTH, SCREEN_HEIGHT);
+	const auto PAGE_COUNT = 2;
+	auto BufferPage = 0;
 
-	ColorBuffer ColorBuff(DIBBuff.Surface(), SCREEN_WIDTH, SCREEN_HEIGHT);
-	DepthBuffer DepthBuff(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT);
-	GBuffer GBuff(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT);
+	DIBBuffer DIBBuffer[PAGE_COUNT];
+	for (auto i = 0; i < PAGE_COUNT; ++i)
+	{
+		DIBBuffer[i].Create(hWnd, hWindowDC, SCREEN_WIDTH, SCREEN_HEIGHT);
+	}
 
-	ColorBuff.Clear(0xFF000000);
-	DepthBuff.Clear(1.0f);
-	GBuff.Clear(GBufferData{ 0xFFFF });
+	ColorBuffer BackBuffers[PAGE_COUNT] = {
+		ColorBuffer(DIBBuffer[0].Surface(), SCREEN_WIDTH, SCREEN_HEIGHT),
+		ColorBuffer(DIBBuffer[1].Surface(), SCREEN_WIDTH, SCREEN_HEIGHT),
+	};
+	DepthBuffer DepthBuffers[PAGE_COUNT] = {
+		DepthBuffer(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT),
+		DepthBuffer(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT),
+	};
+	GBuffer GBuffers[PAGE_COUNT] = {
+		GBuffer(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT),
+		GBuffer(nullptr, SCREEN_WIDTH, SCREEN_HEIGHT),
+	};
+
+	for (auto i = 0; i < PAGE_COUNT; ++i)
+	{
+		BackBuffers[i].Clear(0xFF000000);
+		DepthBuffers[i].Clear(1.0f);
+		GBuffers[i].Clear(GBufferData{ 0xFFFF });
+	}
+
+	//--------------------------------------------------------------------------
+	// タスクシステム初期化
+	//--------------------------------------------------------------------------
+	TaskSystem::Instance().Initialize();
 
 	//--------------------------------------------------------------------------
 	// メッセージループ
@@ -322,23 +346,36 @@ int32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int32)
 		}
 
 		//------------------------------------------------------
+		// バッファフリップ
+		//------------------------------------------------------
+		const auto DrawPage = BufferPage;
+		const auto RenderPage = 1 - BufferPage;
+		BufferPage = 1 - BufferPage;
+
+		//------------------------------------------------------
 		// メイン処理
 		//------------------------------------------------------
 		{
-			// バッファを画面に転送してクリアする（必要ならBMP出力も
-			::BitBlt(
-				hWindowDC, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,
-				DIBBuff.SurfaceDC(), 0, 0, SRCCOPY);
-			if (_RequireSaveScene)
-			{
-				_RequireSaveScene = false;
-				SaveToBMP(L"ScreenShot.bmp", ColorBuff);
-			}
-			ColorBuff.Clear(0xFF000000);
-			// 深度バッファをクリアする
-			DepthBuff.Clear(1.0f);
-			// Gバッファをクリアする
-			GBuff.Clear(GBufferData{ 0xFFFF });
+			// バッファを画面に転送してクリアするジョブ（必要ならBMP出力も
+			TaskSystem::Instance().PushQue([&](void* pData) {
+				::BitBlt(
+					hWindowDC, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,
+					DIBBuffer[DrawPage].SurfaceDC(), 0, 0, SRCCOPY);
+				if (_RequireSaveScene)
+				{
+					_RequireSaveScene = false;
+					SaveToBMP(L"ScreenShot.bmp", BackBuffers[DrawPage]);
+				}
+				BackBuffers[DrawPage].Clear(0xFF000000);
+			}, nullptr);
+			// 深度バッファをクリアするジョブ
+			TaskSystem::Instance().PushQue([&](void* pData) {
+				DepthBuffers[DrawPage].Clear(1.0f);
+			}, nullptr);
+			// Gバッファをクリアするジョブ
+			TaskSystem::Instance().PushQue([&](void* pData) {
+				GBuffers[DrawPage].Clear(GBufferData{ 0xFFFF });
+			}, nullptr);
 
 			// フレームのdeltaを求める
 			static auto PreTime = Timer.GetMicro();
@@ -348,14 +385,25 @@ int32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int32)
 
 			// フレームの更新処理
 			_App.OnUpdate(FrameTime);
-			_App.OnRendering(&ColorBuff, &DepthBuff, &GBuff);
+			_App.OnRendering(&BackBuffers[RenderPage], &DepthBuffers[RenderPage], &GBuffers[RenderPage]);
 		}
+
+		// 積まれているタスクジョブの実行
+		TaskSystem::Instance().Execute();
 	}
+
+	//--------------------------------------------------------------------------
+	// タスクシステム開放
+	//--------------------------------------------------------------------------
+	TaskSystem::Instance().Finalize();
 
 	//--------------------------------------------------------------------------
 	// バックバッファ解放
 	//--------------------------------------------------------------------------
-	DIBBuff.Release();
+	for (auto i = 0; i < PAGE_COUNT; ++i)
+	{
+		DIBBuffer[i].Release();
+	}
 
 	//--------------------------------------------------------------------------
 	// 解放

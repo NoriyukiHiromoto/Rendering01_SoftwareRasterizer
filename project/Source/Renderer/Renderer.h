@@ -18,6 +18,7 @@
 //
 //======================================================================================================
 #include <Math/Math.h>
+#include <Misc/Atomic.h>
 #include <Renderer/FrameBuffer.h>
 #include <Renderer/Texture.h>
 
@@ -77,6 +78,27 @@ struct RenderMeshData
 	uint16				TriangleId;
 	uint16				TextureId;
 	Matrix				mWorld;
+	Matrix				mViewProj;
+};
+
+struct RasterizeTriangleData
+{
+	int16			bbMinX;
+	int16			bbMinY;
+	int16			bbMaxX;
+	int16			bbMaxY;
+	uint16			TriangleId;
+	uint16			TextureId;
+	fp32			InvDenom;
+	InternalVertex	v0;
+	InternalVertex	v1;
+	InternalVertex	v2;
+};
+
+struct RasterizeData
+{
+	std::vector<RasterizeTriangleData>	Triangles;
+	Atomic								Count;
 };
 
 //======================================================================================================
@@ -97,12 +119,14 @@ class Renderer
 	std::vector<RenderMeshData>	_RenderMeshDatas;
 	Matrix						_ViewMatrix;
 	Matrix						_ProjMatrix;
+	Matrix						_mViewProj;
 	Vector3						_DirectionalLight;
 	Texture						_DummyTexture;
 	Texture*					_CurrentTexture;
 	std::vector<Texture*>		_Textures;
 	uint16						_CurrentTextureId;
 	uint16						_CurrentTriangleId;
+	RasterizeData				_RasterizeDatas[MAX_TILE_COUNT_Y][MAX_TILE_COUNT_X];
 
 public:
 	Renderer();
@@ -166,9 +190,14 @@ private:
 		return NewPointCount;
 	}
 
+	void PushTriangleToTile(
+		int32 tx, int32 ty,
+		fp32 bbMinX, fp32 bbMinY, fp32 bbMaxX, fp32 bbMaxY, fp32 InvDenom,
+		uint16 TriangleId, uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2);
 	fp32 EdgeFunc(const Vector2& a, const Vector2& b, const Vector2& c);
 	fp32 EdgeFunc(const fp32 ax, const fp32 ay, const fp32 bx, const fp32 by, const fp32 cx, const fp32 cy);
 	void RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2);
+	void RasterizeTile(int32 tx, int32 ty);
 	void RenderTriangle(uint16 TriangleId, uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount);
 	void DeferredShading(int32 x, int32 y, int32 w, int32 h);
 

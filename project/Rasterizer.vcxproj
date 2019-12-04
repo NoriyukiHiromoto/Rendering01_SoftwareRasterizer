@@ -22,19 +22,27 @@
     </ClCompile>
     <ClCompile Include="Source\Framework\Framework.cpp" />
     <ClCompile Include="Source\Math\Math.cpp" />
+    <ClCompile Include="Source\Misc\Atomic.cpp" />
+    <ClCompile Include="Source\Misc\Semaphore.cpp" />
     <ClCompile Include="Source\Misc\Timer.cpp" />
     <ClCompile Include="Source\Renderer\FrameBuffer.cpp" />
     <ClCompile Include="Source\Renderer\Renderer.cpp" />
     <ClCompile Include="Source\Renderer\Texture.cpp" />
+    <ClCompile Include="Source\TaskSystem\TaskPipeline.cpp" />
+    <ClCompile Include="Source\TaskSystem\TaskSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Application\Application.h" />
     <ClInclude Include="Source\Framework\pch.h" />
     <ClInclude Include="Source\Math\Math.h" />
+    <ClInclude Include="Source\Misc\Atomic.h" />
+    <ClInclude Include="Source\Misc\Semaphore.h" />
     <ClInclude Include="Source\Misc\Timer.h" />
     <ClInclude Include="Source\Renderer\FrameBuffer.h" />
     <ClInclude Include="Source\Renderer\Renderer.h" />
     <ClInclude Include="Source\Renderer\Texture.h" />
+    <ClInclude Include="Source\TaskSystem\TaskPipeline.h" />
+    <ClInclude Include="Source\TaskSystem\TaskSystem.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>

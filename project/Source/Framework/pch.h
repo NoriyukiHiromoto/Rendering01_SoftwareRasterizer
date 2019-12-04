@@ -65,7 +65,14 @@ static const int32		SCREEN_HEIGHT_HALF		= SCREEN_HEIGHT / 2;
 static const fp32		SCREEN_WIDTH_HALF_F		= fp32(SCREEN_WIDTH_HALF);
 static const fp32		SCREEN_HEIGHT_HALF_F	= fp32(SCREEN_HEIGHT_HALF);
 
+static const int32		MAX_TILE_TRIANGLE_COUNT	= 10 * 10000;
 static const int32		MAX_VERTEX_CACHE_SIZE	= 0x0000FFFF;
+
+static const int32		BUFFER_TILE_SIZE_X		= SCREEN_WIDTH  / 20;
+static const int32		BUFFER_TILE_SIZE_Y		= SCREEN_HEIGHT / 20;
+
+static const int32		MAX_TILE_COUNT_X		= (SCREEN_WIDTH  + (BUFFER_TILE_SIZE_X - 1)) / BUFFER_TILE_SIZE_X;
+static const int32		MAX_TILE_COUNT_Y		= (SCREEN_HEIGHT + (BUFFER_TILE_SIZE_Y - 1)) / BUFFER_TILE_SIZE_Y;
 
 //======================================================================================================
 //

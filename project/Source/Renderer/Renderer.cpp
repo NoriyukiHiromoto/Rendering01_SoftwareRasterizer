@@ -13,6 +13,7 @@
 //
 //======================================================================================================
 #include <Renderer/Renderer.h>
+#include <TaskSystem/TaskSystem.h>
 
 //======================================================================================================
 //
@@ -21,6 +22,17 @@ Renderer::Renderer()
 	: _pColorBuffer(nullptr)
 	, _pDepthBuffer(nullptr)
 {
+	// タイルごとのポリゴンデータの入れ物
+	// 並列処理されるので最初に入れ物を用意しておく
+	for (int32 y = 0; y < MAX_TILE_COUNT_Y; ++y)
+	{
+		for (int32 x = 0; x < MAX_TILE_COUNT_X; ++x)
+		{
+			_RasterizeDatas[y][x].Count = 0;
+			_RasterizeDatas[y][x].Triangles.resize(MAX_TILE_TRIANGLE_COUNT);
+		}
+	}
+
 	// テクスチャがセットされない場合用の白のダミーテクスチャ
 	_DummyTexture.Create(2, 2);
 	memset(_DummyTexture.GetTexelPtr(), 0x80, sizeof(uint32[2][2]));
@@ -46,9 +58,11 @@ void Renderer::BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, G
 
 	_RenderMeshDatas.clear();
 
-	_CurrentTriangleId = 0;
-	_CurrentTextureId = 0;
 	_Textures.clear();
+	_Textures.push_back(nullptr);
+
+	_CurrentTextureId = int32(_Textures.size());
+	_CurrentTriangleId = 0;
 }
 
 //======================================================================================================
@@ -56,51 +70,109 @@ void Renderer::BeginDraw(ColorBuffer* pColorBuffer, DepthBuffer* pDepthBuffer, G
 //======================================================================================================
 void Renderer::EndDraw()
 {
-	Matrix mViewProj;
-	Matrix_Multiply4x4(mViewProj, _ViewMatrix, _ProjMatrix);
+	Matrix_Multiply4x4(_mViewProj, _ViewMatrix, _ProjMatrix);
 
-	// メッシュ毎に処理する
+	// メッシュ毎にジョブを作って並列処理する
+	// ・座標変換
+	// ・シザリング
+	// ・レンダリングする可能性のあるタイルへのデータの追加
 	{
 		const int32 MeshCount = int32(_RenderMeshDatas.size());
 		for (int32 i = 0; i < MeshCount; ++i)
 		{
-			const auto& Mesh = _RenderMeshDatas[i];
-
-			Matrix mWorldViewProj;
-			Matrix_Multiply4x4(mWorldViewProj, Mesh.mWorld, mViewProj);
-
-			auto pPosTbl = Mesh.pMeshData->GetPosition();
-			auto pNormalTbl = Mesh.pMeshData->GetNormal();
-			const auto VertexCount = Mesh.pMeshData->GetVertexCount();
-			ASSERT(VertexCount <= MAX_VERTEX_CACHE_SIZE);
-			static Vector4 Positions[MAX_VERTEX_CACHE_SIZE];
-			for (auto i = 0; i < VertexCount; ++i)
-			{
-				Matrix_Transform4x4(Positions[i], pPosTbl[i], mWorldViewProj);
-			}
-			static Vector3 Normals[MAX_VERTEX_CACHE_SIZE];
-			for (auto i = 0; i < VertexCount; ++i)
-			{
-				Matrix_Transform3x3(Normals[i], pNormalTbl[i], Mesh.mWorld);
-			}
-
-			RenderTriangle(
-				Mesh.TriangleId,
-				Mesh.TextureId,
-				Mesh.pMeshData,
-				Positions,
-				Normals,
-				Mesh.pMeshData->GetTexCoord(),
-				VertexCount,
-				Mesh.pMeshData->GetIndex(),
-				Mesh.pMeshData->GetIndexCount());
+			TaskSystem::Instance().PushQue([&](void* pData) {
+				auto* pMesh = reinterpret_cast<RenderMeshData*>(pData);
+				const auto VertexCount = pMesh->pMeshData->GetVertexCount();
+				ASSERT(VertexCount <= MAX_VERTEX_CACHE_SIZE);
+				thread_local static Vector4 Positions[MAX_VERTEX_CACHE_SIZE];
+				thread_local static Vector3 Normals[MAX_VERTEX_CACHE_SIZE];
+				const auto mWorld = pMesh->mWorld;
+				const auto mViewProj = _mViewProj;
+				auto pPosTbl = pMesh->pMeshData->GetPosition();
+				for (auto i = 0; i < VertexCount; ++i)
+				{
+					Matrix_Transform4x4(Positions[i], pPosTbl[i], mViewProj);
+				}
+				auto pNormalTbl = pMesh->pMeshData->GetNormal();
+				for (auto i = 0; i < VertexCount; ++i)
+				{
+					Matrix_Transform3x3(Normals[i], pNormalTbl[i], mWorld);
+				}
+				RenderTriangle(
+					pMesh->TriangleId,
+					pMesh->TextureId,
+					pMesh->pMeshData,
+					Positions,
+					Normals,
+					pMesh->pMeshData->GetTexCoord(),
+					VertexCount,
+					pMesh->pMeshData->GetIndex(),
+					pMesh->pMeshData->GetIndexCount());
+			}, &_RenderMeshDatas[i]);
 		}
+
+		TaskSystem::Instance().PushBarrier();
 	}
 
-	// GBufferの内容をもとにシェーディングを行う処理をする
+	// タイルごとにジョブを作って並列処理する
+	// ・三角形のラスタライズをする
+	// ・ピクセルごとの深度テストをする
+	// ・ピクセルごとの法線とUVをとマテリアル情報をGBufferに書き込む
+	{
+		const int32 txCount = (SCREEN_WIDTH  + BUFFER_TILE_SIZE_X - 1) / BUFFER_TILE_SIZE_X;
+		const int32 tyCount = (SCREEN_HEIGHT + BUFFER_TILE_SIZE_Y - 1) / BUFFER_TILE_SIZE_Y;
+		for (int32 y = 0; y < tyCount; ++y)
+		{
+			for (int32 x = 0; x < txCount; ++x)
+			{
+				union PackedPosition {
+					struct {
+						int32 x, y;
+					};
+					int64 packed;
+				};
+				PackedPosition Position;
+				Position.x = x;
+				Position.y = y;
+
+				TaskSystem::Instance().PushQue([this](void* pData) {
+					PackedPosition Pos;
+					Pos.packed = (int64)pData;
+					RasterizeTile(Pos.x, Pos.y);
+				}, (void*)Position.packed);
+			}
+		}
+
+		TaskSystem::Instance().PushBarrier();
+	}
+
+	// GBufferの内容をもとにシェーディングを行うジョブを作って並列処理をする
 	// ・ピクセルごとのマテリアル情報を元にテクスチャマッピングとライティングを行う
 	{
-		DeferredShading(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+		const int32 w = SCREEN_WIDTH;
+		const int32 h = 5;
+		const int32 yn = SCREEN_HEIGHT / h;
+
+		for (int32 y = 0; y < yn; ++y)
+		{
+			union PackedRect {
+				struct {
+					int16 x, y, w, h;
+				};
+				int64 packed;
+			};
+			PackedRect Rect;
+			Rect.x = 0;
+			Rect.y = y * h;
+			Rect.w = w;
+			Rect.h = h;
+
+			TaskSystem::Instance().PushQue([this](void* pData) {
+				PackedRect Rc;
+				Rc.packed = (int64)pData;
+				DeferredShading(Rc.x, Rc.y, Rc.w, Rc.h);
+			}, (void*)Rect.packed);
+		}
 	}
 }
 
@@ -151,48 +223,22 @@ void Renderer::RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVe
 	const auto y0 = int16(bbMinY);
 	const auto y1 = int16(bbMaxY);
 
-	auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(x0, y0);
-	auto pGBuffer = _pGBuffer->GetPixelPointer(x0, y0);
+	const auto tx0 = x0 / BUFFER_TILE_SIZE_X;
+	const auto tx1 = std::min(x1 / BUFFER_TILE_SIZE_X, MAX_TILE_COUNT_X - 1);
+	const auto ty0 = y0 / BUFFER_TILE_SIZE_Y;
+	const auto ty1 = std::min(y1 / BUFFER_TILE_SIZE_Y, MAX_TILE_COUNT_Y - 1);
 
-	fp32 py = fp32(y0) + 0.5f;
-	for (int32 y = y0; y <= y1; ++y, py += 1.0f)
+	for (auto ty = ty0; ty <= ty1; ++ty)
 	{
-		bool bRasterized = false;
-		int32 x_offset = 0;
-		fp32 px = fp32(x0) + 0.5f;
-		for (auto x = x0; x <= x1; ++x, px += 1.0f, ++x_offset)
+		for (auto tx = tx0; tx <= tx1; ++tx)
 		{
-			auto b0 = EdgeFunc(p1.x, p1.y, p2.x, p2.y, px, py);
-			if (b0 < 0.0f) if (bRasterized) break; else continue;
-			auto b1 = EdgeFunc(p2.x, p2.y, p0.x, p0.y, px, py);
-			if (b1 < 0.0f) if (bRasterized) break; else continue;
-			auto b2 = EdgeFunc(p0.x, p0.y, p1.x, p1.y, px, py);
-			if (b2 < 0.0f) if (bRasterized) break; else continue;
-
-			bRasterized = true;
-
-			const auto Depth = (b0 * p0.z) + (b1 * p1.z) + (b2 * p2.z);
-			auto& DepthBuf = pDepthBuffer[x_offset];
-			if (Depth >= DepthBuf) continue;
-			DepthBuf = Depth;
-
-			b0 *= InvDenom;
-			b1 *= InvDenom;
-			b2 *= InvDenom;
-
-			const auto w = 1.0f / ((b0 * p0.w) + (b1 * p1.w) + (b2 * p2.w));
-			auto& GBuff = pGBuffer[x_offset];
-			GBuff.TextureId = TextureId;
-			GBuff.TriangleId = TriangleId;
-			GBuff.Normal.x = ((b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x)) * w;
-			GBuff.Normal.y = ((b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y)) * w;
-			GBuff.Normal.z = ((b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z)) * w;
-			GBuff.TexCoord.x = ((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)) * w;
-			GBuff.TexCoord.y = ((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)) * w;
+			PushTriangleToTile(
+				tx, ty,
+				bbMinX, bbMinY, bbMaxX, bbMaxY,
+				InvDenom,
+				TriangleId, TextureId,
+				v0, v1, v2);
 		}
-
-		pDepthBuffer += SCREEN_WIDTH;
-		pGBuffer += SCREEN_WIDTH;
 	}
 }
 
@@ -211,6 +257,112 @@ fp32 Renderer::EdgeFunc(const Vector2& a, const Vector2& b, const Vector2& c)
 fp32 Renderer::EdgeFunc(const fp32 ax, const fp32 ay, const fp32 bx, const fp32 by, const fp32 cx, const fp32 cy)
 {
 	return ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax));
+}
+
+//======================================================================================================
+//
+//======================================================================================================
+void Renderer::PushTriangleToTile(
+	int32 tx, int32 ty,
+	fp32 bbMinX, fp32 bbMinY, fp32 bbMaxX, fp32 bbMaxY, fp32 InvDenom,
+	uint16 TriangleId, uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2)
+{
+	const auto minTileX = tx * BUFFER_TILE_SIZE_X;
+	const auto minTileY = ty * BUFFER_TILE_SIZE_Y;
+	const auto maxTileX = minTileX + BUFFER_TILE_SIZE_X - 1;
+	const auto maxTileY = minTileY + BUFFER_TILE_SIZE_Y - 1;
+
+	auto& Dst = _RasterizeDatas[ty][tx];
+	auto& Tri = Dst.Triangles[Dst.Count.Increment() - 1];
+	Tri.bbMinX		= std::max(int16(bbMinX), int16(minTileX));
+	Tri.bbMinY		= std::max(int16(bbMinY), int16(minTileY));
+	Tri.bbMaxX		= std::min(int16(bbMaxX), int16(maxTileX));
+	Tri.bbMaxY		= std::min(int16(bbMaxY), int16(maxTileY));
+	Tri.TriangleId	= TriangleId;
+	Tri.TextureId	= TextureId;
+	Tri.InvDenom	= InvDenom;
+	Tri.v0			= v0;
+	Tri.v1			= v1;
+	Tri.v2			= v2;
+}
+
+//======================================================================================================
+//
+//======================================================================================================
+void Renderer::RasterizeTile(int32 tx, int32 ty)
+{
+	auto& Src = _RasterizeDatas[ty][tx];
+	const int32_t Count = Src.Count.Load();
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const auto& Tri = Src.Triangles[i];
+
+		const auto p0 = Tri.v0.Position;
+		const auto p1 = Tri.v1.Position;
+		const auto p2 = Tri.v2.Position;
+		const auto n0 = Tri.v0.Normal;
+		const auto n1 = Tri.v1.Normal;
+		const auto n2 = Tri.v2.Normal;
+		const auto t0 = Tri.v0.TexCoord;
+		const auto t1 = Tri.v1.TexCoord;
+		const auto t2 = Tri.v2.TexCoord;
+
+		const auto InvDenom		= Tri.InvDenom;
+		const auto TextureId	= Tri.TextureId;
+		const auto TriangleId	= Tri.TriangleId;
+
+		const auto x0 = Tri.bbMinX;
+		const auto x1 = Tri.bbMaxX;
+		const auto y0 = Tri.bbMinY;
+		const auto y1 = Tri.bbMaxY;
+
+		auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(x0, y0);
+		auto pGBuffer = _pGBuffer->GetPixelPointer(x0, y0);
+
+		fp32 py = fp32(y0) + 0.5f;
+		for (int32 y = y0; y <= y1; ++y, py += 1.0f)
+		{
+			bool bRasterized = false;
+			int32 x_offset = 0;
+			fp32 px = fp32(x0) + 0.5f;
+			for (auto x = x0; x <= x1; ++x, px += 1.0f, ++x_offset)
+			{
+				auto b0 = EdgeFunc(p1.x, p1.y, p2.x, p2.y, px, py);
+				if (b0 < 0.0f) if (bRasterized) break; else continue;
+				auto b1 = EdgeFunc(p2.x, p2.y, p0.x, p0.y, px, py);
+				if (b1 < 0.0f) if (bRasterized) break; else continue;
+				auto b2 = EdgeFunc(p0.x, p0.y, p1.x, p1.y, px, py);
+				if (b2 < 0.0f) if (bRasterized) break; else continue;
+
+				bRasterized = true;
+
+				const auto Depth = (b0 * p0.z) + (b1 * p1.z) + (b2 * p2.z);
+				auto& DepthBuf = pDepthBuffer[x_offset];
+				if (Depth >= DepthBuf) continue;
+				DepthBuf = Depth;
+
+				b0 *= InvDenom;
+				b1 *= InvDenom;
+				b2 *= InvDenom;
+
+				const auto w = 1.0f / ((b0 * p0.w) + (b1 * p1.w) + (b2 * p2.w));
+				auto& GBuff = pGBuffer[x_offset];
+				GBuff.TextureId  = TextureId;
+				GBuff.TriangleId = TriangleId;
+				GBuff.Normal.x = ((b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x)) * w;
+				GBuff.Normal.y = ((b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y)) * w;
+				GBuff.Normal.z = ((b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z)) * w;
+				GBuff.TexCoord.x = ((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)) * w;
+				GBuff.TexCoord.y = ((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)) * w;
+			}
+
+			pDepthBuffer += SCREEN_WIDTH;
+			pGBuffer += SCREEN_WIDTH;
+		}
+	}
+
+	Src.Count = 0;
 }
 
 //======================================================================================================

@@ -17,6 +17,9 @@
     <Filter Include="Misc">
       <UniqueIdentifier>{af71da3c-2853-4dbb-8513-4a07252965e3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="TaskSystem">
+      <UniqueIdentifier>{9a79e5df-ac2a-4796-95f5-36d98ca59bb8}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Framework\pch.cpp">
@@ -43,6 +46,18 @@
     <ClCompile Include="Source\Misc\Timer.cpp">
       <Filter>Misc</Filter>
     </ClCompile>
+    <ClCompile Include="Source\TaskSystem\TaskPipeline.cpp">
+      <Filter>TaskSystem</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\TaskSystem\TaskSystem.cpp">
+      <Filter>TaskSystem</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Misc\Atomic.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Misc\Semaphore.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Framework\pch.h">
@@ -64,6 +79,18 @@
       <Filter>Renderer</Filter>
     </ClInclude>
     <ClInclude Include="Source\Misc\Timer.h">
+      <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\TaskSystem\TaskPipeline.h">
+      <Filter>TaskSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\TaskSystem\TaskSystem.h">
+      <Filter>TaskSystem</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Misc\Atomic.h">
+      <Filter>Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Misc\Semaphore.h">
       <Filter>Misc</Filter>
     </ClInclude>
   </ItemGroup>
