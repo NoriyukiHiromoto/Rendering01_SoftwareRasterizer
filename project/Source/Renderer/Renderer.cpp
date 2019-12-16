@@ -186,18 +186,8 @@ void Renderer::RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVe
 	auto& p1 = v1.Position;
 	auto& p2 = v2.Position;
 
-	// 三角形の各法線
-	auto& n0 = v0.Normal;
-	auto& n1 = v1.Normal;
-	auto& n2 = v2.Normal;
-
-	// 三角形の各UV
-	auto& t0 = v0.TexCoord;
-	auto& t1 = v1.TexCoord;
-	auto& t2 = v2.TexCoord;
-
 	// 外積から面の向きを求めて、裏向きなら破棄する（backface-culling)
-	const auto Denom = EdgeFunc(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+	const auto Denom = ((p1.x - p0.x) * (p2.y - p0.y)) - ((p1.y - p0.y) * (p2.x - p0.x));
 	if (Denom <= 0.0f) return;
 
 	const auto InvDenom = 1.0f / Denom;
@@ -240,23 +230,6 @@ void Renderer::RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVe
 				v0, v1, v2);
 		}
 	}
-}
-
-//======================================================================================================
-//
-//======================================================================================================
-fp32 Renderer::EdgeFunc(const Vector2& a, const Vector2& b, const Vector2& c)
-{
-	Vector2 d1, d2;
-	return Vector_CrossProduct(Vector_Sub(d1, b, a), Vector_Sub(d2, c, a));
-}
-
-//======================================================================================================
-//
-//======================================================================================================
-fp32 Renderer::EdgeFunc(const fp32 ax, const fp32 ay, const fp32 bx, const fp32 by, const fp32 cx, const fp32 cy)
-{
-	return ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax));
 }
 
 //======================================================================================================
@@ -317,28 +290,47 @@ void Renderer::RasterizeTile(int32 tx, int32 ty)
 		const auto y0 = Tri.bbMinY;
 		const auto y1 = Tri.bbMaxY;
 
-		auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(x0, y0);
-		auto pGBuffer = _pGBuffer->GetPixelPointer(x0, y0);
+		const auto beign_x = fp32(x0) + 0.5f;
+		const auto beign_y = fp32(y0) + 0.5f;
 
-		fp32 py = fp32(y0) + 0.5f;
-		for (int32 y = y0; y <= y1; ++y, py += 1.0f)
+		const auto p2_p1_x = p2.x - p1.x;
+		const auto p2_p1_y = p2.y - p1.y;
+		const auto p0_p2_x = p0.x - p2.x;
+		const auto p0_p2_y = p0.y - p2.y;
+		const auto p1_p0_x = p1.x - p0.x;
+		const auto p1_p0_y = p1.y - p0.y;
+
+		auto b0_row = (p2_p1_x * (beign_y - p1.y)) - (p2_p1_y * (beign_x - p1.x));
+		auto b1_row = (p0_p2_x * (beign_y - p2.y)) - (p0_p2_y * (beign_x - p2.x));
+		auto b2_row = (p1_p0_x * (beign_y - p0.y)) - (p1_p0_y * (beign_x - p0.x));
+
+		auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(0, y0);
+		auto pGBuffer = _pGBuffer->GetPixelPointer(0, y0);
+
+		auto py = beign_y;
+		for (auto y = y0; y <= y1; ++y, py += 1.0f)
 		{
-			bool bRasterized = false;
-			int32 x_offset = 0;
-			fp32 px = fp32(x0) + 0.5f;
-			for (auto x = x0; x <= x1; ++x, px += 1.0f, ++x_offset)
+			auto bRasterized = false;
+
+			auto b0_col = b0_row;
+			auto b1_col = b1_row;
+			auto b2_col = b2_row;
+
+			auto px = beign_x;
+			for (auto x = x0; x <= x1; ++x, px += 1.0f, b0_col -= p2_p1_y, b1_col -= p0_p2_y, b2_col -= p1_p0_y)
 			{
-				auto b0 = EdgeFunc(p1.x, p1.y, p2.x, p2.y, px, py);
-				if (b0 < 0.0f) if (bRasterized) break; else continue;
-				auto b1 = EdgeFunc(p2.x, p2.y, p0.x, p0.y, px, py);
-				if (b1 < 0.0f) if (bRasterized) break; else continue;
-				auto b2 = EdgeFunc(p0.x, p0.y, p1.x, p1.y, px, py);
-				if (b2 < 0.0f) if (bRasterized) break; else continue;
+				if (b0_col < 0.0f) if (bRasterized) break; else continue;
+				if (b1_col < 0.0f) if (bRasterized) break; else continue;
+				if (b2_col < 0.0f) if (bRasterized) break; else continue;
 
 				bRasterized = true;
 
+				auto b0 = b0_col;
+				auto b1 = b1_col;
+				auto b2 = b2_col;
+
 				const auto Depth = (b0 * p0.z) + (b1 * p1.z) + (b2 * p2.z);
-				auto& DepthBuf = pDepthBuffer[x_offset];
+				auto& DepthBuf = pDepthBuffer[x];
 				if (Depth >= DepthBuf) continue;
 				DepthBuf = Depth;
 
@@ -347,15 +339,19 @@ void Renderer::RasterizeTile(int32 tx, int32 ty)
 				b2 *= InvDenom;
 
 				const auto w = 1.0f / ((b0 * p0.w) + (b1 * p1.w) + (b2 * p2.w));
-				auto& GBuff = pGBuffer[x_offset];
-				GBuff.TextureId  = TextureId;
+				auto& GBuff = pGBuffer[x];
+				GBuff.TextureId = TextureId;
 				GBuff.TriangleId = TriangleId;
-				GBuff.Normal.x = ((b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x)) * w;
-				GBuff.Normal.y = ((b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y)) * w;
-				GBuff.Normal.z = ((b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z)) * w;
+				GBuff.Normal.x = (b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x);
+				GBuff.Normal.y = (b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y);
+				GBuff.Normal.z = (b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z);
 				GBuff.TexCoord.x = ((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)) * w;
 				GBuff.TexCoord.y = ((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)) * w;
 			}
+
+			b0_row += p2_p1_x;
+			b1_row += p0_p2_x;
+			b2_row += p1_p0_x;
 
 			pDepthBuffer += SCREEN_WIDTH;
 			pGBuffer += SCREEN_WIDTH;
@@ -483,8 +479,10 @@ void Renderer::RenderTriangle(uint16 TriangleId, uint16_t TextureId, const IMesh
 		{
 			auto& pt = TempA[j];
 			auto invW = 1.0f / pt.Position.w;
-			pt.Position.x = (+pt.Position.x * invW * 0.5f + 0.5f) * WidthF;
-			pt.Position.y = (-pt.Position.y * invW * 0.5f + 0.5f) * HeightF;
+			auto screen_x = (+pt.Position.x * invW * 0.5f + 0.5f) * WidthF;
+			auto screen_y = (-pt.Position.y * invW * 0.5f + 0.5f) * HeightF;
+			pt.Position.x = fp32(int32(screen_x * 16.0f) >> 4);
+			pt.Position.y = fp32(int32(screen_y * 16.0f) >> 4);
 			pt.Position.w = invW;
 			pt.TexCoord.x *= invW;
 			pt.TexCoord.y *= invW;
