@@ -179,6 +179,73 @@ void Renderer::EndDraw()
 //======================================================================================================
 //
 //======================================================================================================
+void Renderer::RenderTriangle(uint16 TriangleId, uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount)
+{
+	static const uint8 index_table[8][8] = {
+		{ 0, 0, 0, 0, 0, 0, 0 },	// 0: -
+		{ 0, 0, 0, 0, 0, 0, 0 },	// 1: 0
+		{ 1, 0, 0, 0, 0, 0, 0 },	// 2: 0 1 0
+		{ 1, 2, 0, 0, 0, 0, 0 },	// 3: 0 1 2 0
+		{ 1, 2, 3, 0, 0, 0, 0 },	// 4: 0 1 2 3 0
+		{ 1, 2, 3, 4, 0, 0, 0 },	// 5: 0 1 2 3 4 0
+		{ 1, 2, 3, 4, 5, 0, 0 },	// 6: 0 1 2 3 4 5 0
+		{ 1, 2, 3, 4, 5, 6, 0 },	// 7: 0 1 2 3 4 5 6 0
+	};
+
+	const auto WidthF = SCREEN_WIDTH_F;
+	const auto HeightF = SCREEN_HEIGHT_F;
+
+	InternalVertex TempA[8], TempB[8];
+
+	auto index = 0;
+	while (index < IndexCount)
+	{
+		const auto i0 = pIndex[index++];
+		const auto i1 = pIndex[index++];
+		const auto i2 = pIndex[index++];
+
+		TempA[0] = InternalVertex{ Positions[i0], Normals[i0], Texcoord[i0] };
+		TempA[1] = InternalVertex{ Positions[i1], Normals[i1], Texcoord[i1] };
+		TempA[2] = InternalVertex{ Positions[i2], Normals[i2], Texcoord[i2] };
+		int32 PointCount = 3;
+
+		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.y; });
+		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.y; });
+		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.x; });
+		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.x; });
+		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.z; });
+		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.z; });
+
+		for (int32 j = 0; j < PointCount; ++j)
+		{
+			auto& pt = TempA[j];
+			auto invW = 1.0f / pt.Position.w;
+			auto screen_x = (+pt.Position.x * invW * 0.5f + 0.5f) * WidthF;
+			auto screen_y = (-pt.Position.y * invW * 0.5f + 0.5f) * HeightF;
+			pt.Position.x = fp32(int32(screen_x * 16.0f) >> 4);
+			pt.Position.y = fp32(int32(screen_y * 16.0f) >> 4);
+			pt.Position.w = invW;
+			pt.Position.z *= invW;
+			pt.TexCoord.x *= invW;
+			pt.TexCoord.y *= invW;
+		}
+
+		auto table = index_table[PointCount];
+		auto& cv0 = TempA[0];
+		for (int32 j = 1; j < PointCount - 1; ++j)
+		{
+			auto& cv1 = TempA[j];
+			auto& cv2 = TempA[table[j]];	// [(i + 1) % PointCount]
+			RasterizeTriangle(TriangleId, TextureId, cv0, cv1, cv2);
+		}
+
+		TriangleId++;
+	}
+}
+
+//======================================================================================================
+//
+//======================================================================================================
 void Renderer::RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVertex v0, InternalVertex v1, InternalVertex v2)
 {
 	// 三角形の各位置
@@ -190,13 +257,24 @@ void Renderer::RasterizeTriangle(uint16 TriangleId, uint16 TextureId, InternalVe
 	const auto Denom = ((p1.x - p0.x) * (p2.y - p0.y)) - ((p1.y - p0.y) * (p2.x - p0.x));
 	if (Denom <= 0.0f) return;
 
+	// 補間処理の事前計算
+	auto& t0 = v0.TexCoord;
+	auto& t1 = v1.TexCoord;
+	auto& t2 = v2.TexCoord;
+
 	const auto InvDenom = 1.0f / Denom;
-	const auto InvDenom_W0 = InvDenom * p0.w;
-	const auto InvDenom_W1 = InvDenom * p1.w;
-	const auto InvDenom_W2 = InvDenom * p2.w;
-	p0.z *= InvDenom_W0;
-	p1.z *= InvDenom_W1;
-	p2.z *= InvDenom_W2;
+	p0.z *= InvDenom;
+	p1.z *= InvDenom;
+	p2.z *= InvDenom;
+	p0.w *= InvDenom;
+	p1.w *= InvDenom;
+	p2.w *= InvDenom;
+	t0.x *= InvDenom;
+	t0.y *= InvDenom;
+	t1.x *= InvDenom;
+	t1.y *= InvDenom;
+	t2.x *= InvDenom;
+	t2.y *= InvDenom;
 
 	auto bbMinX = p0.x, bbMinY = p0.y, bbMaxX = p0.x, bbMaxY = p0.y;
 	if (bbMaxX < p1.x) bbMaxX = p1.x;
@@ -307,46 +385,36 @@ void Renderer::RasterizeTile(int32 tx, int32 ty)
 		auto pDepthBuffer = _pDepthBuffer->GetPixelPointer(0, y0);
 		auto pGBuffer = _pGBuffer->GetPixelPointer(0, y0);
 
-		auto py = beign_y;
-		for (auto y = y0; y <= y1; ++y, py += 1.0f)
+		for (auto y = y0; y <= y1; ++y)
 		{
 			auto bRasterized = false;
 
-			auto b0_col = b0_row;
-			auto b1_col = b1_row;
-			auto b2_col = b2_row;
+			auto b0 = b0_row;
+			auto b1 = b1_row;
+			auto b2 = b2_row;
 
-			auto px = beign_x;
-			for (auto x = x0; x <= x1; ++x, px += 1.0f, b0_col -= p2_p1_y, b1_col -= p0_p2_y, b2_col -= p1_p0_y)
+			for (auto x = x0; x <= x1; ++x, b0 -= p2_p1_y, b1 -= p0_p2_y, b2 -= p1_p0_y)
 			{
-				if (b0_col < 0.0f) if (bRasterized) break; else continue;
-				if (b1_col < 0.0f) if (bRasterized) break; else continue;
-				if (b2_col < 0.0f) if (bRasterized) break; else continue;
+				if (b0 < 0.0f || b1 < 0.0f || b2 < 0.0f) if (bRasterized) break; else continue;
 
 				bRasterized = true;
 
-				auto b0 = b0_col;
-				auto b1 = b1_col;
-				auto b2 = b2_col;
-
-				const auto Depth = (b0 * p0.z) + (b1 * p1.z) + (b2 * p2.z);
+				const auto z = (b0 * p0.z) + (b1 * p1.z) + (b2 * p2.z);
 				auto& DepthBuf = pDepthBuffer[x];
-				if (Depth >= DepthBuf) continue;
-				DepthBuf = Depth;
-
-				b0 *= InvDenom;
-				b1 *= InvDenom;
-				b2 *= InvDenom;
+				if (DepthBuf <= z) continue;
+				DepthBuf = z;
 
 				const auto w = 1.0f / ((b0 * p0.w) + (b1 * p1.w) + (b2 * p2.w));
 				auto& GBuff = pGBuffer[x];
-				GBuff.TextureId = TextureId;
+				GBuff.TextureId  = TextureId;
 				GBuff.TriangleId = TriangleId;
-				GBuff.Normal.x = (b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x);
-				GBuff.Normal.y = (b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y);
-				GBuff.Normal.z = (b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z);
-				GBuff.TexCoord.x = ((b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x)) * w;
-				GBuff.TexCoord.y = ((b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y)) * w;
+				GBuff.Normal.x   = (b0 * n0.x) + (b1 * n1.x) + (b2 * n2.x);
+				GBuff.Normal.y   = (b0 * n0.y) + (b1 * n1.y) + (b2 * n2.y);
+				GBuff.Normal.z   = (b0 * n0.z) + (b1 * n1.z) + (b2 * n2.z);
+				GBuff.TexCoord.x = (b0 * t0.x) + (b1 * t1.x) + (b2 * t2.x);
+				GBuff.TexCoord.y = (b0 * t0.y) + (b1 * t1.y) + (b2 * t2.y);
+				GBuff.TexCoord.x *= w;
+				GBuff.TexCoord.y *= w;
 			}
 
 			b0_row += p2_p1_x;
@@ -433,70 +501,4 @@ void Renderer::SetDirectionalLight(const Vector3& Direction)
 void Renderer::DrawIndexed(const IMeshData* pMeshData, const Matrix& mWorld)
 {
 	_RenderMeshDatas.emplace_back(RenderMeshData{ pMeshData,_CurrentTriangleId++, _CurrentTextureId, mWorld });
-}
-
-//======================================================================================================
-//
-//======================================================================================================
-void Renderer::RenderTriangle(uint16 TriangleId, uint16_t TextureId, const IMeshData* pMeshData, const Vector4 Positions[], const Vector3 Normals[], const Vector2 Texcoord[], const int32 VertexCount, const uint16* pIndex, const int32 IndexCount)
-{
-	static const uint8 index_table[8][8] = {
-		{ 0, 0, 0, 0, 0, 0, 0 },	// 0: -
-		{ 0, 0, 0, 0, 0, 0, 0 },	// 1: 0
-		{ 1, 0, 0, 0, 0, 0, 0 },	// 2: 0 1 0
-		{ 1, 2, 0, 0, 0, 0, 0 },	// 3: 0 1 2 0
-		{ 1, 2, 3, 0, 0, 0, 0 },	// 4: 0 1 2 3 0
-		{ 1, 2, 3, 4, 0, 0, 0 },	// 5: 0 1 2 3 4 0
-		{ 1, 2, 3, 4, 5, 0, 0 },	// 6: 0 1 2 3 4 5 0
-		{ 1, 2, 3, 4, 5, 6, 0 },	// 7: 0 1 2 3 4 5 6 0
-	};
-
-	const auto WidthF  = SCREEN_WIDTH_F;
-	const auto HeightF = SCREEN_HEIGHT_F;
-
-	InternalVertex TempA[8], TempB[8];
-
-	auto index = 0;
-	while (index < IndexCount)
-	{
-		const auto i0 = pIndex[index++];
-		const auto i1 = pIndex[index++];
-		const auto i2 = pIndex[index++];
-
-		TempA[0] = InternalVertex{ Positions[i0], Normals[i0], Texcoord[i0] };
-		TempA[1] = InternalVertex{ Positions[i1], Normals[i1], Texcoord[i1] };
-		TempA[2] = InternalVertex{ Positions[i2], Normals[i2], Texcoord[i2] };
-		int32 PointCount = 3;
-
-		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.y; });
-		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.y; });
-		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.x; });
-		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.x; });
-		PointCount = ClipPoints(TempB, TempA, PointCount, [](const Vector4& v) { return v.w - v.z; });
-		PointCount = ClipPoints(TempA, TempB, PointCount, [](const Vector4& v) { return v.w + v.z; });
-
-		for (int32 j = 0; j < PointCount; ++j)
-		{
-			auto& pt = TempA[j];
-			auto invW = 1.0f / pt.Position.w;
-			auto screen_x = (+pt.Position.x * invW * 0.5f + 0.5f) * WidthF;
-			auto screen_y = (-pt.Position.y * invW * 0.5f + 0.5f) * HeightF;
-			pt.Position.x = fp32(int32(screen_x * 16.0f) >> 4);
-			pt.Position.y = fp32(int32(screen_y * 16.0f) >> 4);
-			pt.Position.w = invW;
-			pt.TexCoord.x *= invW;
-			pt.TexCoord.y *= invW;
-		}
-
-		auto table = index_table[PointCount];
-		auto& cv0 = TempA[0];
-		for (int32 j = 1; j < PointCount - 1; ++j)
-		{
-			auto& cv1 = TempA[j];
-			auto& cv2 = TempA[table[j]];	// [(i + 1) % PointCount]
-			RasterizeTriangle(TriangleId, TextureId, cv0, cv1, cv2);
-		}
-
-		TriangleId++;
-	}
 }
