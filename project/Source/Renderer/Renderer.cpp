@@ -84,20 +84,24 @@ void Renderer::EndDraw()
 				auto* pMesh = reinterpret_cast<RenderMeshData*>(pData);
 				const auto VertexCount = pMesh->pMeshData->GetVertexCount();
 				ASSERT(VertexCount <= MAX_VERTEX_CACHE_SIZE);
-				thread_local static Vector4 Positions[MAX_VERTEX_CACHE_SIZE];
-				thread_local static Vector3 Normals[MAX_VERTEX_CACHE_SIZE];
+
 				const auto mWorld = pMesh->mWorld;
 				const auto mViewProj = _mViewProj;
+
+				thread_local static Vector4 Positions[MAX_VERTEX_CACHE_SIZE];
 				auto pPosTbl = pMesh->pMeshData->GetPosition();
 				for (auto i = 0; i < VertexCount; ++i)
 				{
 					Matrix_Transform4x4(Positions[i], pPosTbl[i], mViewProj);
 				}
+
+				thread_local static Vector3 Normals[MAX_VERTEX_CACHE_SIZE];
 				auto pNormalTbl = pMesh->pMeshData->GetNormal();
 				for (auto i = 0; i < VertexCount; ++i)
 				{
 					Matrix_Transform3x3(Normals[i], pNormalTbl[i], mWorld);
 				}
+
 				RenderTriangle(
 					pMesh->TriangleId,
 					pMesh->TextureId,
@@ -222,8 +226,8 @@ void Renderer::RenderTriangle(uint16 TriangleId, uint16_t TextureId, const IMesh
 			auto invW = 1.0f / pt.Position.w;
 			auto screen_x = (+pt.Position.x * invW * 0.5f + 0.5f) * WidthF;
 			auto screen_y = (-pt.Position.y * invW * 0.5f + 0.5f) * HeightF;
-			pt.Position.x = fp32(int32(screen_x * 16.0f) >> 4);
-			pt.Position.y = fp32(int32(screen_y * 16.0f) >> 4);
+			pt.Position.x = floorf(screen_x * 16.0f) / 16.0f;
+			pt.Position.y = floorf(screen_y * 16.0f) / 16.0f;
 			pt.Position.w = invW;
 			pt.Position.z *= invW;
 			pt.TexCoord.x *= invW;
